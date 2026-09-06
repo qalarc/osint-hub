@@ -632,6 +632,13 @@ dialog::backdrop{background:rgba(10,6,8,.62);-webkit-backdrop-filter:blur(3px);b
 .modal-head{margin-bottom:16px}
 .modal-head h2{font-size:18px}
 .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+.notice-body p{font-size:13.5px;line-height:1.65;color:var(--ink-2);margin:0 0 12px}
+.notice-body a{color:var(--red-bright)}
+.link-btn{
+  appearance:none;background:none;border:0;padding:0;cursor:pointer;
+  font:inherit;color:var(--red-bright);text-decoration:underline;text-underline-offset:3px;
+}
+.link-btn:hover{color:var(--red)}
 
 /* ---------- 20. toasts ---------- */
 #toasts{
@@ -853,6 +860,7 @@ dialog::backdrop{background:rgba(10,6,8,.62);-webkit-backdrop-filter:blur(3px);b
             <span class="chips-label">Tool</span>
             <div class="chips" id="datingChips" role="group" aria-label="Dating scan tool"></div>
             <p class="micro">maigret checks its full site database; the toggle below filters results down to known dating platforms. The same filter follows you into the job view.</p>
+            <p class="micro" id="datingLiteNote" hidden>Dating scans need the full backend (maigret) — 3000+ sites. The sweep button is disabled in lite cloud mode.</p>
           </div>
 
           <div class="field">
@@ -931,6 +939,7 @@ dialog::backdrop{background:rgba(10,6,8,.62);-webkit-backdrop-filter:blur(3px);b
           <ul class="defs">
             <li><span class="term">Frontend</span>Any static host — e.g. Cloudflare Pages. It is one file with no server-side requirements.</li>
             <li><span class="term">Backend</span>Any host with the scanner CLIs installed (see Tooling sheet for install hints). API base is configurable at runtime, so frontend and backend can live on different origins.</li>
+            <li><span class="term">Lite vs full</span>LITE CLOUD MODE — Cloudflare Pages Function (<span class="mono">functions/api/[[path]].js</span>): edge username checks (~40 platforms) + instant phone pivots; no server needed. FULL MODE — FastAPI backend: maigret 3000+ sites, holehe email checks, phoneinfoga carrier intel, ignorant phone registrations.</li>
           </ul>
         </div>
       </section>
@@ -991,7 +1000,7 @@ dialog::backdrop{background:rgba(10,6,8,.62);-webkit-backdrop-filter:blur(3px);b
 <footer class="foot">
   <div class="foot-in">
     <p class="fp">For authorized security research, exposure assessment &amp; identity verification only · <a href="https://qalarc.com" target="_blank" rel="noopener noreferrer">qalarc.com</a></p>
-    <p class="fine">Respect platform ToS and local privacy law (GDPR/CCPA). Not for stalking or harassment. — QI-7 · REV 3.1</p>
+    <p class="fine">Respect platform ToS and local privacy law (GDPR/CCPA). Not for stalking or harassment. · <button id="privacyBtn" class="link-btn" type="button">Privacy &amp; use notice</button> · QI-7 · REV 3.1</p>
   </div>
 </footer>
 
@@ -1013,6 +1022,22 @@ dialog::backdrop{background:rgba(10,6,8,.62);-webkit-backdrop-filter:blur(3px);b
   <div class="modal-actions">
     <button id="settingsClose" class="btn btn-ghost" type="button">Close</button>
     <button id="settingsSave" class="btn btn-primary" type="button">Save</button>
+  </div>
+</dialog>
+
+<!-- ================= privacy & use notice modal ================= -->
+<dialog id="privacyModal" aria-labelledby="privacyTitle">
+  <div class="modal-head">
+    <h2 id="privacyTitle">Privacy &amp; Use Notice</h2>
+  </div>
+  <div class="notice-body">
+    <p>Checks run against public web pages for identifiers you enter. Lite mode (Cloudflare) stores nothing — queries are processed in memory at the edge. Self-hosted full mode keeps session job records on the operator's server, auto-pruned.</p>
+    <p>No cookies, no analytics, no tracking. UI settings live in your browser's localStorage only.</p>
+    <p>Results are heuristic — false positives and negatives happen. Not for consequential decisions about people. Authorized research and verification use only; platform terms apply.</p>
+    <p><a href="https://github.com/qalarc/osint-hub" target="_blank" rel="noopener noreferrer">Full notice: PRIVACY.md in the qalarc/osint-hub repo</a></p>
+  </div>
+  <div class="modal-actions">
+    <button id="privacyClose" class="btn btn-ghost" type="button">Close</button>
   </div>
 </dialog>
 
@@ -1103,6 +1128,7 @@ function caseNo() {
 const state = {
   online: null,            /* null = checking, true/false = result */
   health: null,
+  mode: null,              /* null/'full' = FastAPI backend, 'lite' = Cloudflare Pages Function */
   tools: [],
   running: false,
   tab: 'case',
@@ -1258,6 +1284,7 @@ function toast(msg, kind, ms) {
 ============================================================ */
 async function checkHealth() {
   const prev = state.online;
+  const prevMode = state.mode;
   state.online = null;
   renderHealth();
   try {
@@ -1265,15 +1292,20 @@ async function checkHealth() {
     if (r.ok && r.data && r.data.ok === true) {
       state.online = true;
       state.health = r.data;
+      /* lite cloud mode — health served by the Cloudflare Pages Function */
+      state.mode = (r.data && r.data.mode === 'lite') ? 'lite' : 'full';
     } else {
       state.online = false;
       state.health = null;
+      state.mode = null;
     }
   } catch (_) {
     state.online = false;
     state.health = null;
+    state.mode = null;
   }
   renderHealth();
+  if (state.mode !== prevMode) renderChips();   /* chip set + notes differ per mode */
   if (prev === false && state.online === true) toast('API is online.', 'success');
 }
 
@@ -1287,14 +1319,21 @@ function renderHealth() {
     pill.title = 'Checking API…';
   } else if (state.online) {
     pill.classList.add('pill-online');
-    txt.textContent = 'API online';
-    pill.title = 'API online' + (state.health && state.health.version ? ' — v' + state.health.version : '') + '. Click to open Settings.';
+    if (state.mode === 'lite') {
+      txt.textContent = 'LITE · CLOUD';
+      pill.title = 'Lite cloud mode — same-origin Cloudflare Pages Function (edge username checks + phone pivots). Click to open Settings.';
+    } else {
+      txt.textContent = 'API online';
+      pill.title = 'API online' + (state.health && state.health.version ? ' — v' + state.health.version : '') + '. Click to open Settings.';
+    }
   } else {
     pill.classList.add('pill-offline');
     txt.textContent = 'offline — setup';
     pill.title = 'Backend not reachable. Click to open Settings.';
   }
   $('#offlineBanner').hidden = state.online !== false;
+  const datingLiteNote = $('#datingLiteNote');
+  if (datingLiteNote) datingLiteNote.hidden = state.mode !== 'lite';
   setScanning(state.running);       /* refresh scan-button disabled state */
   renderResumeChip();
 }
@@ -1316,7 +1355,7 @@ function setScanning(on) {
   ['caseScan', 'datingScan'].forEach(id => {
     const b = $('#' + id);
     if (!b) return;
-    b.disabled = state.running || !state.online;
+    b.disabled = state.running || !state.online || (id === 'datingScan' && state.mode === 'lite');
     b.classList.toggle('busy', state.running);
     b.setAttribute('aria-busy', String(state.running));
   });
@@ -1359,6 +1398,17 @@ function renderToolsGrid() {
 function toolsForKind(kind) { return state.tools.filter(t => t.kind === kind); }
 
 function renderChips() {
+  /* mode flips change the whole tool set — drop stale selections + init flags
+     so the new mode's installed tools get pre-selected again */
+  const modeKey = state.mode === 'lite' ? 'lite' : 'full';
+  if (renderChips._mode !== modeKey) {
+    renderChips._mode = modeKey;
+    ['chipsUsername', 'chipsPhone', 'chipsEmail', 'datingChips'].forEach(id => {
+      const c = $('#' + id);
+      if (c) delete c.dataset.init;
+    });
+    QTYPES.forEach(k => { state.selected[k] = new Set(); });
+  }
   renderChipGroup($('#chipsUsername'), toolsForKind('username'), 'username');
   renderChipGroup($('#chipsPhone'), toolsForKind('phone'), 'phone');
   renderChipGroup($('#chipsEmail'), toolsForKind('email'), 'email');
@@ -1375,10 +1425,19 @@ function renderChipGroup(container, tools, group) {
   }
   container.textContent = '';
   if (!tools.length) {
-    container.appendChild(el('span', 'muted small',
-      state.online === null ? 'Loading tools…' :
-      state.online ? 'No tools available for this mode.' :
-      'API offline — tool list unavailable.'));
+    let msg;
+    if (state.mode === 'lite' && group === 'email') {
+      msg = 'Email checks need the full backend (holehe) — lite cloud mode covers usernames and phone numbers.';
+    } else if (state.mode === 'lite' && group === 'dating') {
+      msg = 'Dating scans need the full backend (maigret) — 3000+ sites.';
+    } else if (state.online === null) {
+      msg = 'Loading tools…';
+    } else if (state.online) {
+      msg = 'No tools available for this mode.';
+    } else {
+      msg = 'API offline — tool list unavailable.';
+    }
+    container.appendChild(el('span', 'muted small', msg));
     return;
   }
   tools.forEach(t => {
@@ -1460,6 +1519,10 @@ async function refreshRecent() {
   const list = $('#recentList');
   if (!list) return;
   list.textContent = '';
+  if (state.mode === 'lite') {
+    list.appendChild(el('p', 'muted', 'Archive needs the full backend — lite cloud mode keeps no job history.'));
+    return;
+  }
   list.appendChild(el('p', 'muted small', 'Loading…'));
   try {
     const r = await api('/api/jobs?limit=15');
@@ -1538,6 +1601,7 @@ async function postScan(body, origin, wanted) {
 
 /* 01 — CASE FILE: any combination of username / phone / email (≥1). */
 function startCase() {
+  if (state.mode === 'lite') return liteCase();
   const un = $('#caseUsername').value.replace(/^@+/, '').trim();
   const ph = $('#casePhone').value.trim();
   const em = $('#caseEmail').value.trim();
@@ -1567,6 +1631,10 @@ function startCase() {
 
 /* 02 — DATING: username → maigret only. */
 function startDating() {
+  if (state.mode === 'lite') {
+    toast('Dating scans need the full backend (maigret) — 3000+ sites. Lite cloud mode only covers Case File scans.', 'warn');
+    return;
+  }
   const un = $('#datingInput').value.replace(/^@+/, '').trim();
   if (!un) { toast('Enter a username to sweep.', 'warn'); return; }
   const tools = getSelectedTools('dating');
@@ -1577,6 +1645,145 @@ function startDating() {
     tools: tools,
     options: { timeout: parseInt($('#datingTimeout').value, 10) || 10, sites: null, sites_filter: null }
   }, 'dating', [{ tool: 'maigret', qtype: 'username' }]);
+}
+
+/* ============================================================
+   lite cloud mode — scans run on the same-origin Cloudflare
+   Pages Function (functions/api/[[path]].js), no backend needed.
+   Results are fabricated into a terminal job object and rendered
+   through the exact same job pipeline (exhibits, dossier facts,
+   pivots, exports, surveillance log).
+============================================================ */
+async function liteCase() {
+  if (state.running) { toast('A scan is already running — wait for it to finish.', 'warn'); return; }
+  if (!state.online) { toast('Lite API unreachable — check your connection.', 'error'); return; }
+
+  const un = $('#caseUsername').value.replace(/^@+/, '').trim();
+  const ph = $('#casePhone').value.trim();
+  const em = $('#caseEmail').value.trim();
+
+  if (em && !un && !ph) {
+    toast('Email checks need the full backend (holehe) — enter a username or phone number for a lite scan.', 'warn');
+    return;
+  }
+  if (em) toast('Skipping email — holehe email checks need the full backend.', 'info');
+  if (!un && !ph) { toast('Enter a username or phone number to scan.', 'warn'); return; }
+  if (un && !/^[A-Za-z0-9._-]{1,64}$/.test(un)) {
+    toast('Invalid username (allowed: A-Z a-z 0-9 . _ - , max 64 chars).', 'warn');
+    return;
+  }
+  if (ph && !/^\+?[0-9][0-9 ()\-]{6,24}$/.test(ph)) {
+    toast('Invalid phone number (expected E.164-ish, 7-15 digits).', 'warn');
+    return;
+  }
+
+  setScanning(true);
+  const t0 = Math.floor(Date.now() / 1000);
+  const value = {};
+  if (un) value.username = un;
+  if (ph) value.phone = ph;
+  const wanted = [];
+  const results = [];
+  const logs = [];
+
+  if (un) {
+    wanted.push({ tool: 'cloudcheck', qtype: 'username' });
+    logs.push({ tool: 'cloudcheck', qtype: 'username', text: 'edge username check across ~40 platforms (Cloudflare Pages Function)…' });
+    try {
+      const r = await api('/api/lite/check', { method: 'POST', body: JSON.stringify({ value: un }) });
+      if (r.ok && r.data && Array.isArray(r.data.found)) {
+        results.push({
+          tool: 'cloudcheck', qtype: 'username', qvalue: un, status: 'done',
+          found: r.data.found, info: [], error: null, found_count: r.data.found.length
+        });
+        logs.push({ tool: 'cloudcheck', qtype: 'username', text: 'done — ' + r.data.found.length + ' platform hit(s)' });
+      } else if (r.status === 429) {
+        toast('Lite cloud rate limit — 30 scans/hour per IP. Try again later.', 'warn');
+      } else {
+        results.push({
+          tool: 'cloudcheck', qtype: 'username', qvalue: un, status: 'error',
+          found: [], info: [], error: errText(r.data, 'HTTP ' + r.status)
+        });
+        logs.push({ tool: 'cloudcheck', qtype: 'username', text: 'error: ' + errText(r.data, 'HTTP ' + r.status) });
+      }
+    } catch (_) {
+      toast('Network error — cannot reach the lite API.', 'error');
+      /* no result row; continue to the phone part if present */
+    }
+  }
+
+  if (ph) {
+    wanted.push({ tool: 'pivots', qtype: 'phone' });
+    logs.push({ tool: 'pivots', qtype: 'phone', text: 'generating Google-dork search pivots…' });
+    try {
+      const r = await api('/api/lite/pivots', { method: 'POST', body: JSON.stringify({ value: ph }) });
+      if (r.ok && r.data && Array.isArray(r.data.info)) {
+        const pivots = r.data.info.filter(i => i && i.url != null).length;
+        results.push({
+          tool: 'pivots', qtype: 'phone', qvalue: ph, status: 'done',
+          found: [], info: r.data.info, error: null, found_count: 0
+        });
+        logs.push({ tool: 'pivots', qtype: 'phone', text: 'done — ' + pivots + ' pivot link(s) + dossier facts' });
+      } else if (r.status === 429) {
+        toast('Lite cloud rate limit — 30 scans/hour per IP.', 'warn');
+      } else {
+        results.push({
+          tool: 'pivots', qtype: 'phone', qvalue: ph, status: 'error',
+          found: [], info: [], error: errText(r.data, 'HTTP ' + r.status)
+        });
+        logs.push({ tool: 'pivots', qtype: 'phone', text: 'error: ' + errText(r.data, 'HTTP ' + r.status) });
+      }
+    } catch (_) {
+      toast('Network error — cannot reach the lite API.', 'error');
+    }
+  }
+
+  setScanning(false);
+  if (!results.length) return;   /* both parts network-failed — already toasted */
+  const t1 = Math.floor(Date.now() / 1000);
+  const anyDone = results.some(r => r.status === 'done');
+  openLiteJob({
+    id: 'lite-' + Date.now(),
+    type: 'multi',
+    value: value,
+    status: anyDone ? 'done' : 'error',
+    created_at: t0,
+    started_at: t0,
+    finished_at: t1,
+    results: results,
+    log_tail: ''
+  }, wanted, logs);
+}
+
+/* Fabricated local job — pushed through the same rendering path as backend
+   jobs so exhibits, dossier facts, search pivots, exports and the log all
+   keep working. No LS_LAST written: lite jobs can't be resumed server-side. */
+function openLiteJob(job, wanted, logs) {
+  stopLive();
+  state.jobId = job.id;
+  state.job = job;
+  state.jobOrigin = 'case';
+  state.jobWanted = (wanted && wanted.length) ? wanted.slice() : null;
+  state.jobLoadedAt = Date.now();
+  state.frozenAt = Date.now();
+  state.concluded = false;
+  state.logLines = [];
+  state.consolePaused = false;
+  state.expanded = {};
+  consoleEl.textContent = '';
+  consoleEl.scrollTop = 0;
+  appendLog(null, null, '— lite cloud job ' + job.id + ' (Cloudflare Pages Function — no backend) —');
+  (logs || []).forEach(l => appendLog(l.tool, l.qtype, l.text));
+  renderJobHeader();
+  renderJobTools();
+  updateConsoleState();
+  showJobView(true);
+  concludeJob(true);   /* silent: freeze clock, release scan state */
+  const hits = (job.results || []).reduce((a, r) => a + (Array.isArray(r.found) ? r.found.length : 0), 0);
+  const pivotsReady = (job.results || []).some(r => r.tool === 'pivots' && r.status === 'done');
+  if (job.status === 'error') toast('Lite scan ended with an error — check the log.', 'error');
+  else if (pivotsReady && !hits) toast('Pivots ready — see the SEARCH PIVOTS block.', 'success');
+  else toast('Case closed — ' + hits + ' item(s) found.', 'success');
 }
 
 /* ============================================================
@@ -2212,7 +2419,7 @@ function renderResumeChip() {
   const row = $('#resumeRow');
   if (!row) return;
   const id = lsGet(LS_LAST);
-  if (!id || !state.online) { row.hidden = true; return; }
+  if (!id || !state.online || state.mode === 'lite') { row.hidden = true; return; }
   $('#resumeJobId').textContent = id;
   row.hidden = false;
 }
@@ -2295,6 +2502,13 @@ function bindUI() {
   $('#apiPill').addEventListener('click', openSettings);
   $('#settingsSave').addEventListener('click', saveSettings);
   $('#settingsClose').addEventListener('click', () => $('#settingsModal').close());
+
+  /* privacy & use notice (native <dialog>: Esc closes, focus is trapped) */
+  $('#privacyBtn').addEventListener('click', () => {
+    const modal = $('#privacyModal');
+    if (!modal.open) modal.showModal();
+  });
+  $('#privacyClose').addEventListener('click', () => $('#privacyModal').close());
 
   /* resume chip */
   $('#resumeBtn').addEventListener('click', () => {

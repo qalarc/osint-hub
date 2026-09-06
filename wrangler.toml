@@ -1,0 +1,10 @@
+# qalarc · OSINT Hub — Cloudflare Pages project config (lite cloud mode)
+#
+# Connect via Cloudflare Dashboard → Pages → connect Git repo
+# (no build command needed — frontend/ is a committed, self-contained static
+# site). The Pages Function in functions/api/[[path]].js deploys automatically
+# with the project and serves the lite API same-origin at /api/*.
+
+name = "osint-hub"
+compatibility_date = "2026-09-01"
+pages_build_output_dir = "frontend"
