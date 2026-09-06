@@ -1,0 +1,6 @@
+# protect opencode/qalcode sessions (see ~/projects/OPENCODE_MEMORY/README.md)
+.venv/
+bin/
+data/
+__pycache__/
+*.lock

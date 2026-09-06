@@ -1,0 +1,1741 @@
+<!DOCTYPE html>
+<!--
+  qalarc · OSINT Hub — single-file frontend
+  All CSS + JS inline. No frameworks, no CDN, no external requests, no build step.
+  Served by the qalarc_osint backend (same origin by default) or pointed at any
+  instance of that API via Settings (localStorage key: osint_api_base).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0e14">
+<meta name="description" content="qalarc OSINT Hub — username, phone and dating-platform footprint scanning for authorized security research.">
+<title>qalarc · OSINT Hub</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0e14'/%3E%3Cg fill='none' stroke='%238b7bff' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M5 16.2C5 10.1 9.9 5.2 16 5.2s11 4.9 11 11c0 2.3-.3 4.5-.9 6.6'/%3E%3Cpath d='M9.3 18.4A7.4 7.4 0 0 1 8.6 15c0-4.1 3.3-7.4 7.4-7.4s7.4 3.3 7.4 7.4c0 2.6-.3 5.1-.8 7.5'/%3E%3Cpath d='M13 19.9c-.4-1.6-.6-3.4-.6-5.2 0-2 1.6-3.6 3.6-3.6s3.6 1.6 3.6 3.6c0 3.9-.4 7.7-1.2 11.3'/%3E%3Cpath d='M16 14.2v7.5'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+/* ============================= tokens ============================= */
+:root{
+  --bg:#0b0e14;
+  --surface:#131826;
+  --surface-hover:#1a2133;
+  --border:#232b3e;
+  --accent:#8b7bff;
+  --accent-dim:#6c5ce7;
+  --success:#2ecc71;
+  --warn:#f1c40f;
+  --danger:#e74c3c;
+  --text:#e6e9f2;
+  --muted:#8b93a7;
+  --console-bg:#05070c;
+  --mono:ui-monospace,SFMono-Regular,'JetBrains Mono',Menlo,Consolas,'Liberation Mono',monospace;
+  --radius:12px;
+  --radius-sm:8px;
+  --shadow:0 1px 0 rgba(255,255,255,.03),0 10px 30px rgba(2,4,10,.45);
+}
+
+/* ============================= base ============================= */
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none !important}
+html{color-scheme:dark}
+body{
+  margin:0;
+  background:var(--bg);
+  background-image:
+    radial-gradient(900px 480px at 15% -8%,rgba(139,123,255,.07),transparent 60%),
+    radial-gradient(700px 420px at 110% 0%,rgba(108,92,231,.05),transparent 55%);
+  color:var(--text);
+  font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  font-size:14px;line-height:1.5;
+  display:flex;flex-direction:column;min-height:100vh;
+  -webkit-font-smoothing:antialiased;
+}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+::selection{background:rgba(139,123,255,.35)}
+h2{font-size:16px;margin:0 0 4px;font-weight:700}
+h3{font-size:14px;margin:0;font-weight:700}
+p{margin:0}
+a{color:var(--accent)}
+.mono{font-family:var(--mono)}
+.muted{color:var(--muted)}
+.small{font-size:12.5px}
+.micro{font-size:12px;color:var(--muted);margin:6px 0 0;line-height:1.5}
+.skip-link{position:absolute;left:-9999px;top:0;background:var(--accent-dim);color:#fff;padding:8px 14px;border-radius:8px;z-index:400;font-weight:600;text-decoration:none}
+.skip-link:focus{left:12px;top:12px}
+
+/* ============================= header ============================= */
+header.topbar{
+  position:sticky;top:0;z-index:100;
+  display:flex;align-items:center;gap:14px;
+  padding:12px 22px;
+  background:rgba(11,14,20,.82);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--border);
+}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto;min-width:0}
+.logo{flex:none}
+.wordmark{font-size:15px;font-weight:700;letter-spacing:.2px;white-space:nowrap}
+.wordmark .sep{color:var(--accent);margin:0 2px}
+.wordmark .sub{color:var(--muted);font-weight:600}
+.top-actions{display:flex;align-items:center;gap:10px}
+.pill{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:5px 12px;border-radius:999px;
+  font-size:12px;font-weight:600;border:1px solid var(--border);
+  background:var(--surface);color:var(--muted);cursor:pointer;
+  font-family:inherit;transition:border-color .12s,background .12s;
+}
+.pill:hover{border-color:#2c3650}
+.pill .dot{width:8px;height:8px;border-radius:50%;flex:none}
+.pill-online{color:var(--success);border-color:rgba(46,204,113,.4);background:rgba(46,204,113,.08)}
+.pill-online .dot{background:var(--success)}
+.pill-offline{color:var(--danger);border-color:rgba(231,76,60,.4);background:rgba(231,76,60,.08)}
+.pill-offline .dot{background:var(--danger)}
+.pill-checking .dot{background:var(--muted)}
+.icon-btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:36px;height:36px;border-radius:10px;
+  border:1px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer;
+  transition:background .12s,color .12s;
+}
+.icon-btn:hover{color:var(--text);background:var(--surface-hover)}
+
+/* ============================= offline banner ============================= */
+.banner{
+  display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;justify-content:center;
+  width:100%;padding:10px 20px;
+  background:rgba(241,196,15,.07);
+  border-bottom:1px solid rgba(241,196,15,.3);
+  color:var(--warn);font-size:13px;text-align:center;line-height:1.7;
+}
+.banner code{
+  font-family:var(--mono);font-size:12px;
+  background:rgba(241,196,15,.08);
+  border:1px solid rgba(241,196,15,.25);
+  border-radius:6px;padding:1px 6px;
+}
+
+/* ============================= layout ============================= */
+main{flex:1;width:100%}
+.wrap{max-width:1020px;margin:0 auto;padding:26px 22px 48px}
+
+/* ============================= tabs ============================= */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:22px;overflow-x:auto;scrollbar-width:thin}
+.tab{
+  appearance:none;background:none;border:0;border-bottom:2px solid transparent;
+  color:var(--muted);font:inherit;font-size:14px;font-weight:600;
+  padding:10px 16px;cursor:pointer;border-radius:8px 8px 0 0;position:relative;top:1px;
+  white-space:nowrap;transition:color .12s,background .12s;
+}
+.tab:hover{color:var(--text);background:rgba(26,33,51,.5)}
+.tab[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent)}
+
+/* ============================= cards & fields ============================= */
+.panel{outline:none}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px}
+.scan-card{max-width:660px}
+.hint{color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.55}
+.field{margin-bottom:16px;min-width:0}
+.field:last-child{margin-bottom:0}
+label,.label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:6px;letter-spacing:.3px}
+input[type=text],input[type=tel],input[type=password],select{
+  width:100%;background:#0d111d;border:1px solid var(--border);color:var(--text);
+  border-radius:10px;padding:10px 12px;font:inherit;font-size:14px;
+}
+input[type=text],input[type=tel],input[type=password]{caret-color:var(--accent)}
+input::placeholder{color:#4a5266}
+input:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(139,123,255,.18)}
+select{cursor:pointer}
+.field-row{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
+.field-row .field{margin-bottom:0}
+.field-sm{max-width:150px}
+.scan-btn{height:41px;min-width:136px}
+
+/* ============================= buttons ============================= */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  border:1px solid var(--border);background:var(--surface);color:var(--text);
+  font:inherit;font-size:13.5px;font-weight:600;
+  padding:9px 16px;border-radius:10px;cursor:pointer;
+  transition:background .12s,border-color .12s,filter .12s,opacity .12s;
+}
+.btn:hover:not([disabled]){background:var(--surface-hover);border-color:#2c3650}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.btn-primary{background:linear-gradient(180deg,var(--accent),var(--accent-dim));border-color:transparent;color:#fff}
+.btn-primary:hover:not([disabled]){filter:brightness(1.1);background:linear-gradient(180deg,var(--accent),var(--accent-dim))}
+.btn-ghost{background:transparent}
+.btn-xs{padding:4px 10px;font-size:12px;border-radius:var(--radius-sm)}
+.spinner{
+  width:14px;height:14px;border-radius:50%;flex:none;
+  border:2px solid rgba(255,255,255,.35);border-top-color:#fff;
+  animation:spin .7s linear infinite;display:none;
+}
+.scan-btn.busy .spinner{display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ============================= chips ============================= */
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:7px 12px;border-radius:999px;
+  border:1px solid var(--border);background:rgba(19,24,38,.6);
+  color:var(--muted);font:inherit;font-size:13px;font-weight:600;
+  cursor:pointer;transition:border-color .12s,background .12s,color .12s;
+}
+.chip:hover{border-color:#2c3650;color:var(--text)}
+.chip .dot{width:7px;height:7px;border-radius:50%;flex:none}
+.chip .dot.ok{background:var(--success)}
+.chip .dot.miss{background:var(--warn)}
+.chip[aria-pressed="true"]{border-color:rgba(139,123,255,.55);background:rgba(139,123,255,.12);color:var(--text)}
+.chip[aria-pressed="true"] .chip-name::before{content:"✓ "}
+.chip-disabled{border-style:dashed;opacity:.7}
+.chip-disabled:hover{color:var(--muted);border-color:var(--border)}
+.chip-locked{cursor:default}
+.chip-locked:hover{border-color:rgba(139,123,255,.55);color:var(--text)}
+
+/* CSS-only tooltip for [data-tip] */
+[data-tip]{position:relative}
+[data-tip]::after{
+  content:attr(data-tip);
+  position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);
+  background:#05070c;color:var(--text);
+  border:1px solid var(--border);border-radius:8px;
+  padding:6px 10px;font-size:11.5px;font-family:var(--mono);
+  width:max-content;max-width:260px;white-space:normal;text-align:left;
+  opacity:0;pointer-events:none;transition:opacity .12s;z-index:60;
+  box-shadow:var(--shadow);line-height:1.5;
+}
+[data-tip]:hover::after,[data-tip]:focus-visible::after{opacity:1}
+
+/* ============================= resume chip row ============================= */
+.resume-row{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  margin-bottom:14px;padding:8px 10px;
+  border:1px dashed rgba(139,123,255,.4);
+  background:rgba(139,123,255,.06);border-radius:10px;font-size:12.5px;
+}
+
+/* ============================= toggle ============================= */
+.toggle{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);cursor:pointer;user-select:none;font-weight:600;letter-spacing:.2px}
+.toggle input{accent-color:var(--accent-dim);width:15px;height:15px;cursor:pointer;margin:0}
+
+/* ============================= tools grid ============================= */
+.tools-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;margin-top:6px}
+.tool-card{display:flex;flex-direction:column;gap:8px;padding:16px;transition:border-color .12s}
+.tool-card:hover{border-color:#2c3650}
+.tc-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tc-name{margin:0;font-size:14.5px;font-weight:700;flex:1 1 auto}
+.kind-badge{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.8px;text-transform:uppercase;
+  color:var(--accent);border:1px solid rgba(139,123,255,.35);border-radius:6px;padding:2px 7px;
+}
+.kind-badge.k-phone{color:var(--success);border-color:rgba(46,204,113,.35)}
+.install-badge{font-size:10.5px;letter-spacing:.5px;text-transform:uppercase;font-weight:700;border-radius:6px;padding:2px 7px}
+.install-badge.ok{color:var(--success);background:rgba(46,204,113,.1);border:1px solid rgba(46,204,113,.35)}
+.install-badge.miss{color:var(--warn);background:rgba(241,196,15,.08);border:1px solid rgba(241,196,15,.3)}
+.tc-desc{margin:0;color:var(--muted);font-size:12.5px;line-height:1.55;flex:1 1 auto}
+.tc-hint-row{margin:0}
+code.tc-hint{
+  font-size:11.5px;color:var(--warn);background:#0d111d;
+  border:1px dashed rgba(241,196,15,.3);
+  padding:4px 8px;border-radius:6px;display:inline-block;
+  font-family:var(--mono);word-break:break-all;
+}
+
+/* ============================= recent jobs ============================= */
+.recent-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.recent-list{display:flex;flex-direction:column;gap:8px}
+.recent-row{
+  display:grid;grid-template-columns:minmax(110px,1.1fr) auto auto 1fr auto;
+  gap:12px;align-items:center;width:100%;text-align:left;
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:11px 14px;font:inherit;color:var(--text);cursor:pointer;
+  transition:border-color .12s,background .12s;
+}
+.recent-row:hover{background:var(--surface-hover);border-color:#2c3650}
+.rr-value{font-weight:700;font-family:var(--mono);font-size:13.5px;word-break:break-all}
+.rr-date{color:var(--muted);font-size:12.5px;text-align:right;white-space:nowrap}
+.rr-id{color:#4a5266;font-size:11px;white-space:nowrap;text-align:right}
+
+/* ============================= badges ============================= */
+.badge{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:3px 10px;border-radius:999px;
+  font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
+  border:1px solid transparent;white-space:nowrap;
+}
+.badge .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.badge-queued{color:var(--muted);border-color:var(--border);background:rgba(139,147,167,.08)}
+.badge-running{color:var(--accent);border-color:rgba(139,123,255,.45);background:rgba(139,123,255,.1)}
+.badge-done{color:var(--success);border-color:rgba(46,204,113,.4);background:rgba(46,204,113,.08)}
+.badge-error{color:var(--danger);border-color:rgba(231,76,60,.4);background:rgba(231,76,60,.08)}
+.pulse{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+/* ============================= job view ============================= */
+.job-top{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin-bottom:16px}
+.job-title{display:flex;align-items:baseline;gap:10px;min-width:0;flex-wrap:wrap}
+.job-label{font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);font-weight:700}
+.job-value{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--text);word-break:break-all}
+.job-meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.job-elapsed{color:var(--muted);font-size:12.5px;font-family:var(--mono);white-space:nowrap}
+.job-id{color:#4a5266;font-size:11.5px;font-family:var(--mono);word-break:break-all}
+.job-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-left:auto}
+.job-tools{display:flex;flex-direction:column;gap:12px;margin-bottom:16px}
+.tool-result{padding:0;overflow:hidden}
+.tr-head{
+  display:flex;align-items:center;gap:12px;width:100%;
+  background:none;border:0;color:var(--text);font:inherit;
+  padding:13px 16px;cursor:pointer;text-align:left;transition:background .12s;
+}
+.tr-head:hover{background:var(--surface-hover)}
+.chev{width:12px;height:12px;flex:none;color:var(--muted);transition:transform .15s}
+.tool-result.open .chev{transform:rotate(90deg)}
+.tr-name{font-weight:700;font-size:14px;font-family:var(--mono);word-break:break-all}
+.tr-meta{display:flex;align-items:center;gap:10px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
+.tr-count{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
+.tr-body{padding:4px 16px 14px;border-top:1px solid rgba(35,43,62,.6)}
+.tr-error{color:var(--danger);font-size:12.5px;margin:10px 0 0;font-family:var(--mono);word-break:break-word;line-height:1.6}
+.tr-empty{color:var(--muted);font-size:13px;margin:10px 0 0}
+.tr-note{color:var(--muted);font-size:12px;margin:10px 0 0;font-style:italic}
+.found-list{list-style:none;margin:10px 0 0;padding:0}
+.found-item{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding:7px 0;border-top:1px solid rgba(35,43,62,.45)}
+.found-item:first-child{border-top:0}
+.f-site{font-weight:600;font-size:13.5px;min-width:110px}
+.f-url{color:var(--accent);font-size:12px;text-decoration:none;word-break:break-all;flex:1;min-width:200px;font-family:var(--mono)}
+.f-url:hover{text-decoration:underline}
+.f-http{font-size:11px;padding:1px 7px;border-radius:6px;border:1px solid var(--border);color:var(--muted);font-family:var(--mono)}
+.f-http.ok{color:var(--success);border-color:rgba(46,204,113,.35)}
+.f-http.bad{color:var(--danger);border-color:rgba(231,76,60,.35)}
+.f-http.mid{color:var(--warn)}
+
+/* ============================= console ============================= */
+.console-wrap{padding:0;overflow:hidden}
+.console-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid rgba(35,43,62,.6);flex-wrap:wrap}
+.console-head h3{margin:0;font-size:12px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
+.console-state{font-size:11px;font-family:var(--mono);color:var(--muted)}
+.console-state.live{color:var(--success)}
+.console-state.paused{color:var(--warn)}
+.console-head .btn{margin-left:auto}
+.console{
+  background:var(--console-bg);border:0;border-radius:0 0 var(--radius) var(--radius);
+  height:300px;overflow-y:auto;padding:8px 0;
+  font-family:var(--mono);font-size:12px;line-height:1.55;color:#9aa3b8;
+  overscroll-behavior:contain;
+}
+.console::-webkit-scrollbar{width:10px}
+.console::-webkit-scrollbar-thumb{background:#1c2436;border-radius:8px;border:2px solid var(--console-bg)}
+.console:empty::after{content:'waiting for output…';display:block;padding:2px 12px;color:#3d465c;font-style:italic}
+.log-line{display:flex;gap:10px;padding:1px 12px;white-space:pre-wrap;word-break:break-word}
+.log-tool{color:var(--accent);flex:0 0 auto;min-width:76px}
+
+/* ============================= modal ============================= */
+dialog{
+  border:1px solid var(--border);border-radius:14px;
+  background:var(--surface);color:var(--text);
+  padding:22px;width:min(540px,calc(100vw - 36px));
+  box-shadow:0 24px 70px rgba(0,0,0,.5);
+}
+dialog::backdrop{background:rgba(4,6,12,.65);backdrop-filter:blur(3px)}
+.modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+dialog code{font-family:var(--mono);font-size:11.5px;background:#0d111d;border:1px solid var(--border);border-radius:6px;padding:1px 6px}
+
+/* ============================= toasts ============================= */
+#toasts{position:fixed;top:14px;right:14px;z-index:300;display:flex;flex-direction:column;gap:10px;max-width:min(380px,calc(100vw - 28px))}
+.toast{
+  display:flex;align-items:flex-start;gap:10px;
+  background:var(--surface);border:1px solid var(--border);
+  border-left:3px solid var(--accent);
+  border-radius:10px;padding:10px 12px;box-shadow:var(--shadow);
+  font-size:13px;line-height:1.5;animation:toastIn .18s ease;
+}
+.toast-success{border-left-color:var(--success)}
+.toast-warn{border-left-color:var(--warn)}
+.toast-error,.toast-danger{border-left-color:var(--danger)}
+.toast.out{opacity:0;transform:translateX(8px);transition:opacity .2s,transform .2s}
+.toast-msg{flex:1;min-width:0;overflow-wrap:anywhere}
+.toast-x{background:none;border:0;color:var(--muted);font-size:15px;cursor:pointer;padding:0 2px;line-height:1;flex:none}
+.toast-x:hover{color:var(--text)}
+@keyframes toastIn{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:none}}
+
+/* ============================= footer ============================= */
+footer{border-top:1px solid var(--border);padding:26px 20px 36px;text-align:center;color:var(--muted);font-size:12.5px;line-height:1.9}
+footer .fine{color:#5b6478;font-size:11.5px}
+footer a{color:var(--muted)}
+footer a:hover{color:var(--text)}
+
+/* ============================= responsive ============================= */
+@media (max-width:720px){
+  header.topbar{padding:10px 14px}
+  .wordmark .sub{display:none}
+  .wrap{padding:20px 14px 40px}
+  .rr-date{display:none}
+  .recent-row{grid-template-columns:minmax(90px,1fr) auto auto}
+  .rr-id{display:none}
+  .job-actions{margin-left:0}
+  .log-tool{min-width:0}
+}
+
+/* ============================= reduced motion ============================= */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001s !important;animation-iteration-count:1 !important;transition-duration:.001s !important}
+}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<noscript>
+  <div class="banner" role="alert">JavaScript is required — this console runs entirely in your browser.</div>
+</noscript>
+
+<div id="offlineBanner" class="banner" role="alert" hidden>
+  Backend not reachable — run <code>scripts/setup.sh</code> then <code>scripts/run.sh</code> from the qalarc_osint repo, or set the API URL in <strong>Settings</strong>.
+</div>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 32 32" width="26" height="26" fill="none" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id="qg" x1="4" y1="5" x2="27" y2="27" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#8b7bff"/>
+          <stop offset="1" stop-color="#6c5ce7"/>
+        </linearGradient>
+      </defs>
+      <g stroke="url(#qg)" stroke-width="2" stroke-linecap="round">
+        <path d="M5 16.2C5 10.1 9.9 5.2 16 5.2s11 4.9 11 11c0 2.3-.3 4.5-.9 6.6"/>
+        <path d="M9.3 18.4A7.4 7.4 0 0 1 8.6 15c0-4.1 3.3-7.4 7.4-7.4s7.4 3.3 7.4 7.4c0 2.6-.3 5.1-.8 7.5" opacity=".85"/>
+        <path d="M13 19.9c-.4-1.6-.6-3.4-.6-5.2 0-2 1.6-3.6 3.6-3.6s3.6 1.6 3.6 3.6c0 3.9-.4 7.7-1.2 11.3" opacity=".7"/>
+        <path d="M16 14.2v7.5" opacity=".9"/>
+      </g>
+    </svg>
+    <span class="wordmark">qalarc <span class="sep">·</span> <span class="sub">OSINT Hub</span></span>
+  </div>
+  <div class="top-actions">
+    <button id="apiPill" class="pill pill-checking" type="button" title="API status — click to open Settings">
+      <span class="dot" aria-hidden="true"></span><span id="apiPillText">checking…</span>
+    </button>
+    <button id="settingsBtn" class="icon-btn" type="button" aria-label="Settings" aria-haspopup="dialog">
+      <svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" focusable="false">
+        <circle cx="8" cy="8" r="2.2"/>
+        <path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M12.4 3.6l-1.2 1.2M4.8 11.2l-1.2 1.2"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+  <div class="wrap">
+
+    <!-- ================= scanner (tabs) ================= -->
+    <div id="scannerArea">
+
+      <nav id="tabsNav" class="tabs" role="tablist" aria-label="Scan modes">
+        <button class="tab" role="tab" id="tab-username" aria-controls="panel-username" aria-selected="true" tabindex="0" type="button">Username</button>
+        <button class="tab" role="tab" id="tab-phone" aria-controls="panel-phone" aria-selected="false" tabindex="-1" type="button">Phone</button>
+        <button class="tab" role="tab" id="tab-dating" aria-controls="panel-dating" aria-selected="false" tabindex="-1" type="button">Dating</button>
+        <button class="tab" role="tab" id="tab-tools" aria-controls="panel-tools" aria-selected="false" tabindex="-1" type="button">Tools</button>
+        <button class="tab" role="tab" id="tab-recent" aria-controls="panel-recent" aria-selected="false" tabindex="-1" type="button">Recent</button>
+      </nav>
+
+      <!-- Username -->
+      <section class="panel" id="panel-username" role="tabpanel" aria-labelledby="tab-username" tabindex="0">
+        <div class="card scan-card">
+          <h2>Username scan</h2>
+          <p class="hint">Check a username across social networks, forums and other platforms using the selected tools. A leading <span class="mono">@</span> is stripped automatically.</p>
+
+          <div class="resume-row" id="resumeRow" hidden>
+            <button id="resumeBtn" class="btn btn-ghost btn-xs" type="button">↻ resume last job</button>
+            <span class="muted small">last:</span>
+            <span id="resumeJobId" class="mono muted small"></span>
+          </div>
+
+          <div class="field">
+            <label for="usernameInput">Username</label>
+            <input id="usernameInput" type="text" placeholder="@username or plain" autocomplete="off" autocapitalize="off" spellcheck="false">
+          </div>
+
+          <div class="field">
+            <span class="label" id="usernameToolsLabel">Tools</span>
+            <div class="chips" id="usernameChips" role="group" aria-labelledby="usernameToolsLabel"></div>
+          </div>
+
+          <div class="field-row">
+            <div class="field field-sm">
+              <label for="usernameTimeout">Timeout (seconds)</label>
+              <select id="usernameTimeout">
+                <option value="5">5 s</option>
+                <option value="10" selected>10 s</option>
+                <option value="20">20 s</option>
+              </select>
+            </div>
+            <button id="usernameScan" class="btn btn-primary scan-btn" type="button">
+              <span class="spinner" aria-hidden="true"></span><span class="btn-label">Run scan</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Phone -->
+      <section class="panel" id="panel-phone" role="tabpanel" aria-labelledby="tab-phone" tabindex="0" hidden>
+        <div class="card scan-card">
+          <h2>Phone scan</h2>
+          <p class="hint">Enrich and footprint a phone number: carrier and region lookups, reputation checks and reverse-search hits.</p>
+
+          <div class="field">
+            <label for="phoneInput">Phone number</label>
+            <input id="phoneInput" type="tel" placeholder="+61 4xx xxx xxx" autocomplete="off" spellcheck="false">
+          </div>
+
+          <div class="field">
+            <span class="label" id="phoneToolsLabel">Tools</span>
+            <div class="chips" id="phoneChips" role="group" aria-labelledby="phoneToolsLabel"></div>
+          </div>
+
+          <div class="field-row">
+            <div class="field field-sm">
+              <label for="phoneTimeout">Timeout (seconds)</label>
+              <select id="phoneTimeout">
+                <option value="5">5 s</option>
+                <option value="10" selected>10 s</option>
+                <option value="20">20 s</option>
+              </select>
+            </div>
+            <button id="phoneScan" class="btn btn-primary scan-btn" type="button">
+              <span class="spinner" aria-hidden="true"></span><span class="btn-label">Run scan</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Dating -->
+      <section class="panel" id="panel-dating" role="tabpanel" aria-labelledby="tab-dating" tabindex="0" hidden>
+        <div class="card scan-card">
+          <h2>Dating platform scan</h2>
+          <p class="hint">Scans dating platforms (Tinder, Badoo, MeetMe, AFF…) via maigret's site database. Responsible use only.</p>
+
+          <div class="field">
+            <label for="datingInput">Username</label>
+            <input id="datingInput" type="text" placeholder="@username or plain" autocomplete="off" autocapitalize="off" spellcheck="false">
+          </div>
+
+          <div class="field">
+            <span class="label">Tool</span>
+            <div class="chips" id="datingChips" role="group" aria-label="Dating scan tool"></div>
+            <p class="micro">maigret checks its full site database; the toggle below filters results down to known dating platforms. The same filter follows you into the job view.</p>
+          </div>
+
+          <div class="field">
+            <label class="toggle"><input type="checkbox" id="datingOnly"> show only dating sites</label>
+          </div>
+
+          <div class="field-row">
+            <div class="field field-sm">
+              <label for="datingTimeout">Timeout (seconds)</label>
+              <select id="datingTimeout">
+                <option value="5">5 s</option>
+                <option value="10" selected>10 s</option>
+                <option value="20">20 s</option>
+              </select>
+            </div>
+            <button id="datingScan" class="btn btn-primary scan-btn" type="button">
+              <span class="spinner" aria-hidden="true"></span><span class="btn-label">Run scan</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tools -->
+      <section class="panel" id="panel-tools" role="tabpanel" aria-labelledby="tab-tools" tabindex="0" hidden>
+        <div class="card">
+          <h2>Available tools</h2>
+          <p class="hint">Tools execute server-side on the API host. Install anything missing on the host, then restart the API — status refreshes on every health check.</p>
+          <div class="tools-grid" id="toolsGrid"></div>
+        </div>
+      </section>
+
+      <!-- Recent -->
+      <section class="panel" id="panel-recent" role="tabpanel" aria-labelledby="tab-recent" tabindex="0" hidden>
+        <div class="card">
+          <div class="recent-head">
+            <div>
+              <h2>Recent jobs</h2>
+              <p class="hint" style="margin-bottom:0">The last 15 jobs known to the API. Click a row to reopen its results and logs.</p>
+            </div>
+            <button id="recentRefresh" class="btn btn-ghost btn-xs" type="button">Refresh</button>
+          </div>
+          <div class="recent-list" id="recentList"></div>
+        </div>
+      </section>
+
+    </div><!-- /scannerArea -->
+
+    <!-- ================= job view ================= -->
+    <section id="jobView" class="job-view" aria-label="Scan job" hidden>
+      <div class="job-top">
+        <button id="jobBack" class="btn btn-ghost btn-xs" type="button">← New scan</button>
+        <div class="job-title">
+          <span class="job-label">Target</span>
+          <span id="jobValue" class="job-value">…</span>
+        </div>
+        <div class="job-meta">
+          <span id="jobStatus"></span>
+          <span id="jobElapsed" class="job-elapsed" aria-label="Elapsed time"></span>
+          <span id="jobId" class="job-id"></span>
+        </div>
+        <div class="job-actions">
+          <label id="datingFilterWrap" class="toggle" hidden>
+            <input type="checkbox" id="datingFilter"> show only dating sites
+          </label>
+          <button id="exportJson" class="btn btn-ghost btn-xs" type="button" disabled>Download JSON</button>
+          <button id="exportMd" class="btn btn-ghost btn-xs" type="button" disabled>Download Markdown report</button>
+        </div>
+      </div>
+
+      <div id="jobTools" class="job-tools"></div>
+
+      <div class="console-wrap card">
+        <div class="console-head">
+          <h3>Console</h3>
+          <span id="consoleState" class="console-state"></span>
+          <button id="jumpLatest" class="btn btn-ghost btn-xs" type="button" hidden>↓ jump to latest</button>
+        </div>
+        <div id="console" class="console" role="log" aria-live="off" aria-label="Live scan log" tabindex="0" title="Live log — newest at the bottom (max 2000 lines kept)"></div>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer>
+  <div>For authorized security research, exposure assessment &amp; identity verification only · <a href="https://qalarc.com" target="_blank" rel="noopener noreferrer">qalarc.com</a></div>
+  <div class="fine">Respect platform ToS and local privacy law (GDPR/CCPA). Not for stalking or harassment.</div>
+</footer>
+
+<!-- ================= settings modal ================= -->
+<dialog id="settingsModal" aria-labelledby="settingsTitle">
+  <div class="modal-head">
+    <h2 id="settingsTitle">Settings</h2>
+  </div>
+  <div class="field">
+    <label for="settingsBase">API base URL</label>
+    <input id="settingsBase" type="text" placeholder="same origin, e.g. https://osint.qalarc.com" autocomplete="off" spellcheck="false">
+    <p class="micro">Leave empty to use the same origin this page is served from. Stored locally as <code>osint_api_base</code>.</p>
+  </div>
+  <div class="field">
+    <label for="settingsToken">Bearer token</label>
+    <input id="settingsToken" type="password" placeholder="optional" autocomplete="off">
+    <p class="micro">Sent as <code>Authorization: Bearer …</code> on every request. When set, live event streaming is unavailable (EventSource cannot send headers) and the console falls back to 1.5 s polling.</p>
+  </div>
+  <div class="modal-actions">
+    <button id="settingsClose" class="btn" type="button">Close</button>
+    <button id="settingsSave" class="btn btn-primary" type="button">Save</button>
+  </div>
+</dialog>
+
+<div id="toasts"></div>
+
+<script>
+(() => {
+'use strict';
+
+/* ============================================================
+   constants
+============================================================ */
+const LS_BASE   = 'osint_api_base';
+const LS_TOKEN  = 'osint_token';
+const LS_LAST   = 'osint_last_job';
+const LS_DATING = 'osint_dating_only';
+
+const TABS = ['username', 'phone', 'dating', 'tools', 'recent'];
+
+/* Dating-platform hostname filter (Dating tab "show only dating sites").
+   Hostname match includes subdomains, "www." stripped. */
+const DATING_SITES = [
+  'tinder.com', 'badoo.com', 'meetme.com', 'adultfriendfinder.com',
+  'okcupid.com', 'pof.com', 'match.com', 'hinge.co', 'bumble.com',
+  'grindr.com', 'feeld.co', 'zoosk.com', 'ashleymadison.com', 'eharmony.com'
+];
+
+const MAX_LOG_LINES    = 2000;
+const POLL_MS          = 1500;
+const FETCH_TIMEOUT_MS = 15000;
+const SVGNS            = 'http://www.w3.org/2000/svg';
+
+/* ============================================================
+   tiny dom helpers
+============================================================ */
+const $ = (sel, root) => (root || document).querySelector(sel);
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+
+function chevronEl() {
+  const s = document.createElementNS(SVGNS, 'svg');
+  s.setAttribute('viewBox', '0 0 16 16');
+  s.setAttribute('aria-hidden', 'true');
+  s.classList.add('chev');
+  const p = document.createElementNS(SVGNS, 'path');
+  p.setAttribute('d', 'M4 6l4 4 4-4');
+  p.setAttribute('fill', 'none');
+  p.setAttribute('stroke', 'currentColor');
+  p.setAttribute('stroke-width', '1.8');
+  p.setAttribute('stroke-linecap', 'round');
+  p.setAttribute('stroke-linejoin', 'round');
+  s.appendChild(p);
+  return s;
+}
+
+/* ============================================================
+   storage (privacy-mode safe)
+============================================================ */
+function lsGet(k) { try { return localStorage.getItem(k); } catch (_) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (_) {} }
+function lsDel(k) { try { localStorage.removeItem(k); } catch (_) {} }
+
+function getBase()  { return (lsGet(LS_BASE) || '').trim().replace(/\/+$/, ''); }
+function getToken() { return (lsGet(LS_TOKEN) || '').trim(); }
+
+/* ============================================================
+   state
+============================================================ */
+const state = {
+  online: null,            /* null = checking, true/false = result */
+  health: null,
+  tools: [],
+  running: false,
+  tab: 'username',
+  selected: { username: new Set(), phone: new Set(), dating: new Set(['maigret']) },
+  datingOnly: false,
+  job: null,               /* accumulated job object (API + live events) */
+  jobId: null,
+  jobOrigin: '',           /* 'username' | 'phone' | 'dating' | 'recent' | 'resume' */
+  jobWanted: null,         /* tool ids requested when the scan started */
+  jobLoadedAt: 0,
+  frozenAt: null,          /* clock freeze point once terminal */
+  concluded: false,
+  logLines: [],            /* {tool, text} — merge source for log_tail polling */
+  consolePaused: false,
+  expanded: {},            /* per-tool expansion persistence */
+  pollTimer: null,
+  es: null
+};
+
+const consoleEl = $('#console');
+
+/* ============================================================
+   utils
+============================================================ */
+function safeParse(s) { try { return JSON.parse(s); } catch (_) { return null; } }
+function isTerminal(s) { return s === 'done' || s === 'error'; }
+
+/* created_at / finished_at may be epoch seconds, epoch ms or ISO — normalise */
+function toMs(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return v < 1e12 ? v * 1000 : v;
+  if (typeof v === 'string') {
+    const t = Date.parse(v);
+    if (!Number.isNaN(t)) return t;
+    const n = Number(v);
+    if (Number.isFinite(n)) return n < 1e12 ? n * 1000 : n;
+  }
+  return null;
+}
+
+function fmtDur(totalSec) {
+  const s = Math.max(0, Math.floor(totalSec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  return (h > 0 ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
+}
+
+function download(filename, text, mime) {
+  const blob = new Blob([text], { type: mime + ';charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function isDatingUrl(u) {
+  try {
+    const h = new URL(String(u)).hostname.toLowerCase().replace(/^www\./, '');
+    return DATING_SITES.some(d => h === d || h.endsWith('.' + d));
+  } catch (_) { return false; }
+}
+
+/* ============================================================
+   api wrapper — 15 s timeout, optional bearer auth
+============================================================ */
+async function api(path, opts) {
+  opts = opts || {};
+  const base = getBase();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  const headers = Object.assign({}, opts.headers || {});
+  headers['Accept'] = 'application/json';
+  if (opts.body) headers['Content-Type'] = 'application/json';
+  const tok = getToken();
+  if (tok) headers['Authorization'] = 'Bearer ' + tok;
+  try {
+    const res = await fetch(base + path, Object.assign({}, opts, { headers: headers, signal: ctrl.signal }));
+    let data = null;
+    try { data = await res.json(); } catch (_) { /* non-JSON body */ }
+    return { ok: res.ok, status: res.status, data: data };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* ============================================================
+   toasts
+============================================================ */
+function toast(msg, kind, ms) {
+  const host = $('#toasts');
+  while (host.childElementCount >= 4) host.firstElementChild.remove();
+  const t = el('div', 'toast toast-' + (kind || 'info'));
+  t.setAttribute('role', 'status');
+  t.appendChild(el('span', 'toast-msg', msg));
+  const x = el('button', 'toast-x', '×');
+  x.type = 'button';
+  x.setAttribute('aria-label', 'Dismiss notification');
+  t.appendChild(x);
+  host.appendChild(t);
+  let dead = false;
+  const kill = () => {
+    if (dead) return;
+    dead = true;
+    t.classList.add('out');
+    setTimeout(() => t.remove(), 220);
+  };
+  x.addEventListener('click', kill);
+  setTimeout(kill, ms || 5000);
+}
+
+/* ============================================================
+   health & tools
+============================================================ */
+async function checkHealth() {
+  const prev = state.online;
+  state.online = null;
+  renderHealth();
+  try {
+    const r = await api('/api/health');
+    if (r.ok && r.data && r.data.ok === true) {
+      state.online = true;
+      state.health = r.data;
+    } else {
+      state.online = false;
+      state.health = null;
+    }
+  } catch (_) {
+    state.online = false;
+    state.health = null;
+  }
+  renderHealth();
+  if (prev === false && state.online === true) toast('API is online.', 'success');
+}
+
+function renderHealth() {
+  const pill = $('#apiPill');
+  const txt = $('#apiPillText');
+  pill.classList.remove('pill-online', 'pill-offline', 'pill-checking');
+  if (state.online === null) {
+    pill.classList.add('pill-checking');
+    txt.textContent = 'checking…';
+    pill.title = 'Checking API…';
+  } else if (state.online) {
+    pill.classList.add('pill-online');
+    txt.textContent = 'API online';
+    pill.title = 'API online' + (state.health && state.health.version ? ' — v' + state.health.version : '') + '. Click to open Settings.';
+  } else {
+    pill.classList.add('pill-offline');
+    txt.textContent = 'offline — setup';
+    pill.title = 'Backend not reachable. Click to open Settings.';
+  }
+  $('#offlineBanner').hidden = state.online !== false;
+  setScanning(state.running);       /* refresh scan-button disabled state */
+  renderResumeChip();
+}
+
+async function fetchTools() {
+  try {
+    const r = await api('/api/tools');
+    if (r.ok && r.data && Array.isArray(r.data.tools)) state.tools = r.data.tools;
+    else state.tools = [];
+  } catch (_) {
+    state.tools = [];
+  }
+  renderChips();
+  renderToolsGrid();
+}
+
+function setScanning(on) {
+  state.running = !!on;
+  ['username', 'phone', 'dating'].forEach(k => {
+    const b = $('#' + k + 'Scan');
+    if (!b) return;
+    b.disabled = state.running || !state.online;
+    b.classList.toggle('busy', state.running);
+    b.setAttribute('aria-busy', String(state.running));
+  });
+}
+
+/* ============================================================
+   tools tab grid
+============================================================ */
+function renderToolsGrid() {
+  const grid = $('#toolsGrid');
+  if (!grid) return;
+  grid.textContent = '';
+  if (!state.tools.length) {
+    grid.appendChild(el('p', 'muted small',
+      state.online === null ? 'Loading tools…' :
+      state.online ? 'No tools reported by the API.' :
+      'API offline — tool status unavailable.'));
+    return;
+  }
+  state.tools.forEach(t => {
+    const card = el('article', 'tool-card card');
+    const head = el('div', 'tc-head');
+    head.appendChild(el('h3', 'tc-name', t.name || t.id || ''));
+    head.appendChild(el('span', 'kind-badge' + (t.kind === 'phone' ? ' k-phone' : ''), t.kind || 'tool'));
+    head.appendChild(el('span', 'install-badge ' + (t.installed ? 'ok' : 'miss'), t.installed ? 'installed' : 'not installed'));
+    card.appendChild(head);
+    card.appendChild(el('p', 'tc-desc', t.description || ''));
+    if (!t.installed) {
+      const p = el('p', 'tc-hint-row');
+      p.appendChild(el('code', 'tc-hint', t.hint || 'see server setup docs'));
+      card.appendChild(p);
+    }
+    grid.appendChild(card);
+  });
+}
+
+/* ============================================================
+   tool chips
+============================================================ */
+function toolsForKind(kind) { return state.tools.filter(t => t.kind === kind); }
+
+function renderChips() {
+  renderChipGroup($('#usernameChips'), toolsForKind('username'), 'username', false);
+  renderChipGroup($('#phoneChips'), toolsForKind('phone'), 'phone', false);
+  renderChipGroup($('#datingChips'), state.tools.filter(t => t.id === 'maigret'), 'dating', true);
+}
+
+function renderChipGroup(container, tools, group, locked) {
+  if (!container) return;
+  const sel = state.selected[group];
+  if (!container.dataset.init && tools.length) {
+    container.dataset.init = '1';
+    if (!locked) tools.forEach(t => { if (t.installed) sel.add(t.id); });
+  }
+  container.textContent = '';
+  if (!tools.length) {
+    container.appendChild(el('span', 'muted small',
+      state.online === null ? 'Loading tools…' :
+      state.online ? 'No tools available for this mode.' :
+      'API offline — tool list unavailable.'));
+    return;
+  }
+  tools.forEach(t => {
+    const b = el('button', 'chip');
+    b.type = 'button';
+    const pressed = locked ? true : sel.has(t.id);
+    b.setAttribute('aria-pressed', String(pressed));
+    const dot = el('span', 'dot ' + (t.installed ? 'ok' : 'miss'));
+    b.appendChild(dot);
+    b.appendChild(el('span', 'chip-name', t.name || t.id));
+    if (!t.installed) {
+      b.classList.add('chip-disabled');
+      b.setAttribute('aria-disabled', 'true');
+      b.setAttribute('data-tip', 'Not installed — ' + (t.hint || 'see Tools tab'));
+      b.addEventListener('click', e => {
+        e.preventDefault();
+        toast((t.name || t.id) + ' is not installed on the server. ' + (t.hint || ''), 'warn');
+      });
+    } else if (locked) {
+      b.classList.add('chip-locked');
+      b.setAttribute('data-tip', 'Dating scans run maigret only');
+    } else {
+      b.addEventListener('click', () => {
+        if (sel.has(t.id)) sel.delete(t.id); else sel.add(t.id);
+        b.setAttribute('aria-pressed', String(sel.has(t.id)));
+      });
+    }
+    container.appendChild(b);
+  });
+}
+
+function getSelectedTools(group) {
+  if (group === 'dating') {
+    const t = state.tools.find(x => x.id === 'maigret');
+    return (t && t.installed) ? ['maigret'] : [];
+  }
+  return Array.from(state.selected[group]).filter(id => {
+    const t = state.tools.find(x => x.id === id);
+    return !!(t && t.installed);
+  });
+}
+
+/* ============================================================
+   tabs
+============================================================ */
+function selectTab(name) {
+  state.tab = name;
+  TABS.forEach(t => {
+    const tab = $('#tab-' + t);
+    const panel = $('#panel-' + t);
+    const on = t === name;
+    tab.setAttribute('aria-selected', String(on));
+    tab.tabIndex = on ? 0 : -1;
+    panel.hidden = !on;
+  });
+  if (name === 'recent') refreshRecent();
+}
+
+function onTabsKeydown(e) {
+  const tabs = TABS.map(t => $('#tab-' + t));
+  const i = tabs.indexOf(document.activeElement);
+  if (i < 0) return;
+  let j = null;
+  if (e.key === 'ArrowRight') j = (i + 1) % tabs.length;
+  else if (e.key === 'ArrowLeft') j = (i - 1 + tabs.length) % tabs.length;
+  else if (e.key === 'Home') j = 0;
+  else if (e.key === 'End') j = tabs.length - 1;
+  if (j != null) {
+    e.preventDefault();
+    tabs[j].focus();
+    selectTab(TABS[j]);
+  }
+}
+
+/* ============================================================
+   recent jobs
+============================================================ */
+async function refreshRecent() {
+  const list = $('#recentList');
+  if (!list) return;
+  list.textContent = '';
+  list.appendChild(el('p', 'muted small', 'Loading…'));
+  try {
+    const r = await api('/api/jobs?limit=15');
+    if (!r.ok || !r.data || !Array.isArray(r.data.jobs)) throw new Error('bad response');
+    list.textContent = '';
+    if (!r.data.jobs.length) {
+      list.appendChild(el('p', 'muted', 'No recent jobs yet — run your first scan.'));
+      return;
+    }
+    r.data.jobs.forEach(j => list.appendChild(recentRow(j)));
+  } catch (_) {
+    list.textContent = '';
+    list.appendChild(el('p', 'muted', 'Could not load recent jobs — API offline or unreachable.'));
+  }
+}
+
+function recentRow(j) {
+  const b = el('button', 'recent-row');
+  b.type = 'button';
+  b.appendChild(el('span', 'rr-value', j.value != null ? String(j.value) : '(unknown)'));
+  b.appendChild(el('span', 'kind-badge' + (j.type === 'phone' ? ' k-phone' : ''), j.type || ''));
+  const st = el('span', 'rr-status');
+  st.appendChild(statusBadge(j.status));
+  b.appendChild(st);
+  const t = toMs(j.created_at);
+  b.appendChild(el('span', 'rr-date', t ? new Date(t).toLocaleString() : (j.created_at != null ? String(j.created_at) : '')));
+  b.appendChild(el('span', 'rr-id', j.id || ''));
+  b.setAttribute('aria-label', 'Open job ' + (j.id || '') + ' — target ' + (j.value != null ? String(j.value) : 'unknown') + ', status ' + (j.status || 'unknown'));
+  b.addEventListener('click', () => {
+    if (!j.id) return;
+    lsSet(LS_LAST, j.id);
+    renderResumeChip();
+    openJob(j.id, 'recent');
+  });
+  return b;
+}
+
+/* ============================================================
+   scan start
+============================================================ */
+async function startScan(type, rawValue, tools, timeout, origin) {
+  if (state.running) { toast('A scan is already running — wait for it to finish.', 'warn'); return; }
+  if (!state.online) { toast('Backend offline — start the API first (see banner).', 'error'); return; }
+  if (!tools.length) { toast('Select at least one installed tool.', 'warn'); return; }
+
+  let value = String(rawValue == null ? '' : rawValue).trim();
+  if (type === 'username') value = value.replace(/^@+/, '').trim();
+  if (!value) {
+    toast('Enter a ' + (type === 'phone' ? 'phone number' : 'username') + ' to scan.', 'warn');
+    return;
+  }
+
+  setScanning(true);
+  let res;
+  try {
+    res = await api('/api/scan', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: type,
+        value: value,
+        tools: tools,
+        options: { timeout: timeout || 10, sites: null, sites_filter: null }
+      })
+    });
+  } catch (_) {
+    setScanning(false);
+    toast('Network error — cannot reach the API.', 'error');
+    return;
+  }
+
+  if (res.status === 202 && res.data && res.data.job_id) {
+    lsSet(LS_LAST, res.data.job_id);
+    renderResumeChip();
+    openJob(res.data.job_id, origin, tools);
+    return;
+  }
+
+  setScanning(false);
+  if (res.status === 400 || res.status === 401 || res.status === 429) {
+    let m = (res.data && res.data.error) ? res.data.error : ('HTTP ' + res.status);
+    if (res.status === 401) m = 'Unauthorized — set a token in Settings.';
+    if (res.status === 429) m = 'Rate limited — ' + ((res.data && res.data.error) || 'retry later');
+    toast(m, res.status === 429 ? 'warn' : 'error');
+  } else {
+    toast('Unexpected API response (HTTP ' + res.status + ').', 'error');
+  }
+}
+
+/* ============================================================
+   job view — open / data / live
+============================================================ */
+function showJobView(show) {
+  $('#jobView').hidden = !show;
+  $('#scannerArea').hidden = show;
+}
+
+async function openJob(id, origin, wanted) {
+  stopLive();
+  state.jobId = id;
+  state.job = null;
+  state.jobOrigin = origin || '';
+  state.jobWanted = (wanted && wanted.length) ? wanted.slice() : null;
+  state.jobLoadedAt = Date.now();
+  state.frozenAt = null;
+  state.concluded = false;
+  state.logLines = [];
+  state.consolePaused = false;
+  state.expanded = {};
+  consoleEl.textContent = '';
+  consoleEl.scrollTop = 0;
+  renderJobHeader();
+  renderJobTools();
+  updateConsoleState();
+  showJobView(true);
+  appendLog(null, '— job ' + id + ' opened —');
+
+  let loaded = false;
+  try {
+    const r = await api('/api/jobs/' + encodeURIComponent(id));
+    if (r.ok && r.data && r.data.id) {
+      if (!state.jobWanted) state.jobWanted = (r.data.results || []).map(x => x.tool);
+      applyJobData(r.data, { silent: isTerminal(r.data.status) });
+      loaded = true;
+    } else if (r.status === 404) {
+      toast('Job not found: ' + id, 'error');
+      showJobView(false);
+      setScanning(false);
+      renderResumeChip();
+      return;
+    } else {
+      toast('Could not load job (HTTP ' + r.status + ').', 'error');
+    }
+  } catch (_) {
+    toast('Network error loading job.', 'error');
+  }
+
+  if (state.jobId !== id) return; /* user moved on mid-fetch */
+  if (state.job && !isTerminal(state.job.status)) {
+    setScanning(true);
+    startLive(id);
+  } else {
+    setScanning(false);
+    if (loaded && state.job) concludeJob(true);
+  }
+}
+
+function applyJobData(data, opts) {
+  if (!data) return;
+  opts = opts || {};
+  const prev = state.job;
+  const prevStatus = prev ? prev.status : undefined;
+  state.job = Object.assign({}, prev || { id: state.jobId }, data);
+
+  if (typeof data.log_tail === 'string' && data.log_tail.length) {
+    const tail = data.log_tail.replace(/\n+$/, '').split('\n')
+      .map(t => ({ tool: null, text: t }));
+    if (tail.length) {
+      const merged = mergeTail(state.logLines, tail);
+      const added = merged.slice(state.logLines.length);
+      state.logLines = merged.slice(-MAX_LOG_LINES);
+      for (const l of added) appendLog(l.tool, l.text);
+    }
+  }
+
+  renderJobHeader();
+  renderJobTools();
+
+  if (isTerminal(state.job.status) && !isTerminal(prevStatus)) concludeJob(!!opts.silent);
+}
+
+/* Merge a fresh log_tail (suffix of the server log) onto what we have. */
+function mergeTail(prev, tail) {
+  if (!tail.length) return prev;
+  if (!prev.length) return tail.slice();
+  const max = Math.min(prev.length, tail.length, 200);
+  for (let k = max; k > 0; k--) {
+    let same = true;
+    for (let i = 0; i < k; i++) {
+      const a = prev[prev.length - k + i];
+      const b = tail[i];
+      if (a.text !== b.text || (a.tool || null) !== (b.tool || null)) { same = false; break; }
+    }
+    if (same) return prev.concat(tail.slice(k));
+  }
+  return prev.concat(tail); /* no overlap → assume brand-new lines */
+}
+
+function appendLog(tool, text) {
+  const row = el('div', 'log-line');
+  if (tool) {
+    row.dataset.tool = tool;
+    row.appendChild(el('span', 'log-tool', tool));
+  }
+  row.appendChild(el('span', 'log-text', String(text == null ? '' : text)));
+  consoleEl.appendChild(row);
+  while (consoleEl.childElementCount > MAX_LOG_LINES) consoleEl.firstElementChild.remove();
+  if (!state.consolePaused) consoleEl.scrollTop = consoleEl.scrollHeight;
+}
+
+/* When falling back from SSE to polling, seed the merge array from the DOM. */
+function rebuildLogLinesFromDom() {
+  state.logLines = [];
+  consoleEl.querySelectorAll('.log-line').forEach(r => {
+    const t = r.querySelector('.log-text');
+    state.logLines.push({ tool: r.dataset.tool || null, text: t ? t.textContent : '' });
+  });
+}
+
+/* ---------- live updates ---------- */
+function startLive(id) {
+  if (getToken() || typeof EventSource === 'undefined') startPolling(id);
+  else startStream(id);
+}
+
+function stopLive() {
+  if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+  if (state.es) { try { state.es.close(); } catch (_) {} state.es = null; }
+}
+
+function startPolling(id) {
+  stopLive();
+  rebuildLogLinesFromDom();
+  state.pollTimer = setInterval(async () => {
+    if (state.jobId !== id) { stopLive(); return; }
+    try {
+      const r = await api('/api/jobs/' + encodeURIComponent(id));
+      if (state.jobId !== id) return;
+      if (r.ok && r.data) applyJobData(r.data);
+      else if (r.status === 404) { concludeJob(false); toast('Job disappeared (404).', 'error'); }
+    } catch (_) { /* transient network issue — keep trying */ }
+  }, POLL_MS);
+  updateConsoleState();
+}
+
+function startStream(id) {
+  stopLive();
+  const url = getBase() + '/api/jobs/' + encodeURIComponent(id) + '/stream';
+  let es;
+  try { es = new EventSource(url); }
+  catch (_) { startPolling(id); return; }
+  state.es = es;
+  es.addEventListener('log', ev => {
+    const d = safeParse(ev.data);
+    if (d) appendLog(d.tool || null, d.line != null ? String(d.line) : '');
+  });
+  es.addEventListener('found', ev => {
+    const d = safeParse(ev.data);
+    if (d && d.tool) addFound(d.tool, d.item);
+  });
+  es.addEventListener('tool_done', ev => {
+    const d = safeParse(ev.data);
+    if (d && d.tool) toolDone(d.tool, d.found_count);
+  });
+  es.addEventListener('job_done', ev => {
+    const d = safeParse(ev.data) || {};
+    finishStream(d.status || 'done');
+  });
+  es.onerror = () => {
+    if (state.jobId !== id) { es.close(); return; }
+    if (state.job && isTerminal(state.job.status)) { es.close(); state.es = null; return; }
+    es.close();           /* stream dropped mid-job → fall back to polling */
+    state.es = null;
+    startPolling(id);
+  };
+  updateConsoleState();
+}
+
+async function finishStream(fallbackStatus) {
+  const id = state.jobId;
+  stopLive();
+  try {
+    const r = await api('/api/jobs/' + encodeURIComponent(id));
+    if (r.ok && r.data && state.jobId === id) applyJobData(r.data);
+  } catch (_) {}
+  if (state.jobId === id && state.job && !isTerminal(state.job.status)) {
+    state.job.status = fallbackStatus;
+    applyJobData(state.job);
+  }
+}
+
+/* ---------- incremental (SSE) result mutation ---------- */
+function ensureResult(tool) {
+  if (!state.job) state.job = { id: state.jobId, results: [] };
+  if (!Array.isArray(state.job.results)) state.job.results = [];
+  let r = state.job.results.find(x => x.tool === tool);
+  if (!r) {
+    r = { tool: tool, status: 'running', found: [], error: null, found_count: null };
+    state.job.results.push(r);
+  }
+  return r;
+}
+
+function addFound(tool, item) {
+  if (!item) return;
+  const r = ensureResult(tool);
+  if (!Array.isArray(r.found)) r.found = [];
+  const url = item.url != null ? String(item.url) : '';
+  const site = item.site != null ? String(item.site) : '';
+  if (url && r.found.some(f => (f.url != null ? String(f.url) : '') === url && (f.site != null ? String(f.site) : '') === site)) return;
+  r.found.push(item);
+  if (r.status === 'queued') r.status = 'running';
+  renderJobHeader();
+  renderJobTools();
+}
+
+function toolDone(tool, count) {
+  const r = ensureResult(tool);
+  r.status = 'done';
+  if (count != null) r.found_count = count;
+  renderJobHeader();
+  renderJobTools();
+}
+
+/* ---------- terminal ---------- */
+function concludeJob(silent) {
+  stopLive();
+  setScanning(false);
+  state.frozenAt = Date.now();
+  if (!state.job || state.concluded) return;
+  state.concluded = true;
+  if (!silent) {
+    if (state.job.status === 'error') {
+      toast('Job ended with an error — check the console.', 'danger');
+    } else {
+      const n = (state.job.results || []).reduce((a, r) => {
+        const found = Array.isArray(r.found) ? r.found.length : 0;
+        return a + (r.found_count != null ? Math.max(r.found_count, found) : found);
+      }, 0);
+      toast('Scan complete — ' + n + ' account(s) found.', 'success');
+    }
+  }
+  renderJobHeader();
+  renderJobTools();
+  updateConsoleState();
+}
+
+/* ============================================================
+   job view rendering
+============================================================ */
+function statusBadge(status) {
+  const s = String(status || 'queued').toLowerCase();
+  const known = (s === 'queued' || s === 'running' || s === 'done' || s === 'error') ? s : 'queued';
+  const b = el('span', 'badge badge-' + known, known);
+  if (known === 'running') b.appendChild(el('span', 'dot pulse'));
+  return b;
+}
+
+function renderJobHeader() {
+  const j = state.job;
+  $('#jobValue').textContent = (j && j.value != null) ? String(j.value) : '…';
+  const host = $('#jobStatus');
+  host.textContent = '';
+  host.appendChild(statusBadge(j ? j.status : 'queued'));
+  $('#jobId').textContent = state.jobId || '';
+  const dating = state.jobOrigin === 'dating';
+  $('#datingFilterWrap').hidden = !dating;
+  if (dating) $('#datingFilter').checked = !!state.datingOnly;
+  $('#exportJson').disabled = !j;
+  $('#exportMd').disabled = !j;
+  updateElapsed();
+  updateConsoleState();
+}
+
+function renderJobTools() {
+  const hostEl = $('#jobTools');
+  if (!hostEl) return;
+  hostEl.textContent = '';
+  const results = (state.job && Array.isArray(state.job.results)) ? state.job.results : [];
+  const order = [];
+  (state.jobWanted || []).forEach(t => { if (!order.includes(t)) order.push(t); });
+  results.forEach(r => { if (r && r.tool && !order.includes(r.tool)) order.push(r.tool); });
+  if (!order.length) {
+    hostEl.appendChild(el('p', 'muted', 'Waiting for tool results…'));
+    return;
+  }
+  const byTool = new Map(results.map(r => [r.tool, r]));
+  order.forEach(t => {
+    const r = byTool.get(t) || { tool: t, status: 'queued', found: [], error: null };
+    hostEl.appendChild(buildToolCard(r));
+  });
+}
+
+function applyDatingFilter(list) {
+  if (!(state.jobOrigin === 'dating' && state.datingOnly)) return list;
+  return list.filter(f => isDatingUrl(f && f.url));
+}
+
+function datingFilterNote(total, visible) {
+  if (!(state.jobOrigin === 'dating' && state.datingOnly)) return '';
+  if (visible === total) return total ? 'Filtered to known dating platforms.' : '';
+  return 'Showing ' + visible + ' of ' + total + ' — dating platforms only.';
+}
+
+function foundSummary(r) {
+  const found = Array.isArray(r.found) ? r.found : [];
+  const reported = (r.found_count != null) ? r.found_count : null;
+  const total = Math.max(reported != null ? reported : 0, found.length);
+  if (!total) return r.status === 'done' ? '0 found' : '—';
+  const visible = applyDatingFilter(found).length;
+  if (state.jobOrigin === 'dating' && state.datingOnly && visible < total) return visible + '/' + total + ' shown';
+  if (reported != null && reported > found.length) return reported + ' found';
+  return total + ' found';
+}
+
+function buildToolCard(r) {
+  const expanded = state.expanded[r.tool] !== false;
+  const card = el('article', 'tool-result card' + (expanded ? ' open' : ''));
+  const headId = 'trh-' + r.tool;
+  const head = el('button', 'tr-head');
+  head.type = 'button';
+  head.id = headId;
+  head.setAttribute('aria-expanded', String(expanded));
+  head.setAttribute('aria-controls', headId + '-body');
+  head.appendChild(chevronEl());
+  head.appendChild(el('span', 'tr-name', r.tool));
+  const meta = el('span', 'tr-meta');
+  meta.appendChild(statusBadge(r.status));
+  meta.appendChild(el('span', 'tr-count', foundSummary(r)));
+  head.appendChild(meta);
+
+  const body = el('div', 'tr-body');
+  body.id = headId + '-body';
+  if (!expanded) body.hidden = true;
+
+  head.addEventListener('click', () => {
+    const now = state.expanded[r.tool] === false; /* toggle */
+    state.expanded[r.tool] = now;
+    card.classList.toggle('open', now);
+    head.setAttribute('aria-expanded', String(now));
+    body.hidden = !now;
+  });
+
+  if (r.error) body.appendChild(el('p', 'tr-error', 'error: ' + r.error));
+
+  const found = Array.isArray(r.found) ? r.found : [];
+  const visible = applyDatingFilter(found);
+  if (visible.length) {
+    const list = el('ul', 'found-list');
+    visible.forEach(f => list.appendChild(foundRow(f)));
+    body.appendChild(list);
+  } else {
+    body.appendChild(el('p', 'tr-empty',
+      r.status === 'done' ? 'No accounts found on this tool.' : 'Waiting for results…'));
+  }
+  const note = datingFilterNote(found.length, visible.length);
+  if (note) body.appendChild(el('p', 'tr-note', note));
+
+  card.appendChild(head);
+  card.appendChild(body);
+  return card;
+}
+
+function foundRow(f) {
+  const li = el('li', 'found-item');
+  li.appendChild(el('span', 'f-site', f.site != null ? String(f.site) : (f.url != null ? String(f.url) : 'result')));
+  const u = f.url != null ? String(f.url) : '';
+  if (/^https?:\/\//i.test(u)) {
+    const a = document.createElement('a');
+    a.className = 'f-url';
+    a.href = u;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = u;
+    li.appendChild(a);
+  } else if (u) {
+    li.appendChild(el('span', 'f-url', u));
+  }
+  if (f.http_status != null && f.http_status !== '') {
+    const hs = el('span', 'f-http', String(f.http_status));
+    const n = Number(f.http_status);
+    if (n >= 200 && n < 300) hs.classList.add('ok');
+    else if (n >= 400) hs.classList.add('bad');
+    else hs.classList.add('mid');
+    li.appendChild(hs);
+  }
+  return li;
+}
+
+/* ---------- elapsed ---------- */
+function updateElapsed() {
+  const e = $('#jobElapsed');
+  if (!e) return;
+  if (!state.job) { e.textContent = ''; return; }
+  const start = toMs(state.job.created_at) || state.jobLoadedAt;
+  const end = toMs(state.job.finished_at) || state.frozenAt || Date.now();
+  e.textContent = 'elapsed ' + fmtDur((end - start) / 1000);
+}
+
+function tick() {
+  if (state.job && !$('#jobView').hidden) updateElapsed();
+}
+
+/* ---------- console state ---------- */
+function updateConsoleState() {
+  const s = $('#consoleState');
+  const live = !!(state.job && !isTerminal(state.job.status) && (state.pollTimer || state.es));
+  if (state.consolePaused) {
+    s.textContent = 'paused';
+    s.className = 'console-state paused';
+    $('#jumpLatest').hidden = false;
+  } else if (live) {
+    s.textContent = 'live';
+    s.className = 'console-state live';
+    $('#jumpLatest').hidden = true;
+  } else {
+    s.textContent = '';
+    s.className = 'console-state';
+    $('#jumpLatest').hidden = true;
+  }
+}
+
+/* ============================================================
+   dating filter (shared between Dating tab + job view)
+============================================================ */
+function setDatingOnly(v) {
+  state.datingOnly = !!v;
+  if (state.datingOnly) lsSet(LS_DATING, '1'); else lsDel(LS_DATING);
+  const a = $('#datingOnly');
+  const b = $('#datingFilter');
+  if (a) a.checked = state.datingOnly;
+  if (b) b.checked = state.datingOnly;
+  renderJobTools();
+}
+
+/* ============================================================
+   exports
+============================================================ */
+function reportBaseName() {
+  const v = ((state.job && state.job.value) || 'target').toString();
+  const slug = v.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'target';
+  return 'osint-report-' + slug + '-' + new Date().toISOString().slice(0, 10);
+}
+
+function mdCell(v) {
+  return String(v == null ? '' : v).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
+function buildMarkdown(job) {
+  const out = [];
+  out.push('# OSINT Report');
+  out.push('');
+  out.push('- **Target:** ' + (job.value != null ? String(job.value) : ''));
+  out.push('- **Type:** ' + (job.type != null ? String(job.type) : ''));
+  out.push('- **Status:** ' + (job.status != null ? String(job.status) : ''));
+  out.push('- **Job ID:** ' + (job.id != null ? String(job.id) : ''));
+  out.push('- **Generated:** ' + new Date().toISOString());
+  const cs = toMs(job.created_at);
+  if (cs) out.push('- **Started:** ' + new Date(cs).toISOString());
+  const cf = toMs(job.finished_at);
+  if (cf) out.push('- **Finished:** ' + new Date(cf).toISOString());
+  out.push('');
+  const results = Array.isArray(job.results) ? job.results : [];
+  let total = 0;
+  results.forEach(r => {
+    const found = Array.isArray(r.found) ? r.found : [];
+    const n = (r.found_count != null) ? Math.max(r.found_count, found.length) : found.length;
+    total += n;
+    out.push('## ' + (r.tool || 'tool') + ' (' + (r.status || '?') + ') — ' + n + ' found');
+    out.push('');
+    if (r.error) {
+      out.push('> Error: ' + mdCell(r.error));
+      out.push('');
+    }
+    if (found.length) {
+      out.push('| Site | URL | HTTP |');
+      out.push('| --- | --- | --- |');
+      found.forEach(f => out.push('| ' + mdCell(f.site) + ' | ' + mdCell(f.url) + ' | ' + mdCell(f.http_status) + ' |'));
+    } else {
+      out.push('_No accounts found._');
+    }
+    out.push('');
+  });
+  out.push('**Total: ' + total + ' account(s) across ' + results.length + ' tool(s).**');
+  out.push('');
+  out.push('---');
+  out.push('');
+  out.push('Generated by qalarc · OSINT Hub — for authorized security research, exposure assessment & identity verification only.');
+  return out.join('\n') + '\n';
+}
+
+/* ============================================================
+   resume chip
+============================================================ */
+function renderResumeChip() {
+  const row = $('#resumeRow');
+  if (!row) return;
+  const id = lsGet(LS_LAST);
+  if (!id || !state.online) { row.hidden = true; return; }
+  $('#resumeJobId').textContent = id;
+  row.hidden = false;
+}
+
+/* ============================================================
+   settings
+============================================================ */
+function openSettings() {
+  const modal = $('#settingsModal');
+  $('#settingsBase').value = lsGet(LS_BASE) || '';
+  $('#settingsToken').value = lsGet(LS_TOKEN) || '';
+  if (!modal.open) modal.showModal();
+}
+
+function saveSettings() {
+  const base = $('#settingsBase').value.trim().replace(/\/+$/, '');
+  const token = $('#settingsToken').value.trim();
+  if (base && !/^https?:\/\//i.test(base)) {
+    toast('API base URL should start with http:// or https:// (or be empty for same origin).', 'warn');
+    return;
+  }
+  if (base) lsSet(LS_BASE, base); else lsDel(LS_BASE);
+  if (token) lsSet(LS_TOKEN, token); else lsDel(LS_TOKEN);
+  $('#settingsModal').close();
+  toast('Settings saved — re-checking API…', 'success');
+  checkHealth();
+  fetchTools();
+}
+
+/* ============================================================
+   bindings & init
+============================================================ */
+function bindUI() {
+  /* tabs */
+  TABS.forEach(t => $('#tab-' + t).addEventListener('click', () => selectTab(t)));
+  $('#tabsNav').addEventListener('keydown', onTabsKeydown);
+
+  /* scan buttons */
+  $('#usernameScan').addEventListener('click', () => {
+    startScan('username', $('#usernameInput').value,
+      getSelectedTools('username'), parseInt($('#usernameTimeout').value, 10) || 10, 'username');
+  });
+  $('#phoneScan').addEventListener('click', () => {
+    startScan('phone', $('#phoneInput').value,
+      getSelectedTools('phone'), parseInt($('#phoneTimeout').value, 10) || 10, 'phone');
+  });
+  $('#datingScan').addEventListener('click', () => {
+    startScan('username', $('#datingInput').value,
+      getSelectedTools('dating'), parseInt($('#datingTimeout').value, 10) || 10, 'dating');
+  });
+
+  /* Enter submits the scan */
+  [['usernameInput', 'usernameScan'], ['phoneInput', 'phoneScan'], ['datingInput', 'datingScan']].forEach(p => {
+    $('#' + p[0]).addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); $('#' + p[1]).click(); }
+    });
+  });
+
+  /* settings */
+  $('#settingsBtn').addEventListener('click', openSettings);
+  $('#apiPill').addEventListener('click', openSettings);
+  $('#settingsSave').addEventListener('click', saveSettings);
+  $('#settingsClose').addEventListener('click', () => $('#settingsModal').close());
+
+  /* resume chip */
+  $('#resumeBtn').addEventListener('click', () => {
+    const id = lsGet(LS_LAST);
+    if (id) openJob(id, 'resume');
+  });
+
+  /* recent */
+  $('#recentRefresh').addEventListener('click', refreshRecent);
+
+  /* job view */
+  $('#jobBack').addEventListener('click', () => {
+    showJobView(false);
+    renderResumeChip();
+  });
+  $('#exportJson').addEventListener('click', () => {
+    if (!state.job) return;
+    download(reportBaseName() + '.json', JSON.stringify(state.job, null, 2) + '\n', 'application/json');
+  });
+  $('#exportMd').addEventListener('click', () => {
+    if (!state.job) return;
+    download(reportBaseName() + '.md', buildMarkdown(state.job), 'text/markdown');
+  });
+
+  /* dating filter (both checkboxes share state) */
+  $('#datingOnly').addEventListener('change', e => setDatingOnly(e.target.checked));
+  $('#datingFilter').addEventListener('change', e => setDatingOnly(e.target.checked));
+
+  /* console autoscroll / pause-on-scroll-up */
+  consoleEl.addEventListener('scroll', () => {
+    const atBottom = consoleEl.scrollHeight - consoleEl.scrollTop - consoleEl.clientHeight < 32;
+    state.consolePaused = !atBottom;
+    updateConsoleState();
+  });
+  $('#jumpLatest').addEventListener('click', () => {
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+    state.consolePaused = false;
+    updateConsoleState();
+  });
+}
+
+function init() {
+  state.datingOnly = lsGet(LS_DATING) === '1';
+  bindUI();
+  selectTab('username');
+  $('#datingOnly').checked = state.datingOnly;
+  renderChips();          /* placeholder state until tools arrive */
+  renderToolsGrid();
+  renderResumeChip();
+  setInterval(tick, 1000);                                      /* elapsed timer */
+  setInterval(() => { if (state.online === false) checkHealth(); }, 30000); /* offline auto-retry */
+  Promise.all([checkHealth(), fetchTools()]);                   /* parallel on load */
+}
+
+init();
+
+})();
+</script>
+</body>
+</html>

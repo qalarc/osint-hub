@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>qalarc · OSINT Hub</title>
+<meta name="description" content="Username & phone number exposure scanning across 3000+ platforms — powered by sherlock, maigret, phoneinfoga & ignorant.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%230b0e14' stroke='%238b7bff' stroke-width='2'/%3E%3Cpath d='M16 24c-4 0-7-3-7-7m7 7c4 0 7-3 7-7M16 24v-5m-5 2c-3 0-5-2-5-5m15 5c3 0 5-2 5-5' fill='none' stroke='%238b7bff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#0b0e14; --surface:#131826; --surface2:#1a2133; --border:#232b3e;
+  --accent:#8b7bff; --accent-dim:#6c5ce7; --ok:#2ecc71; --warn:#f1c40f; --bad:#e74c3c;
+  --text:#e6e9f2; --muted:#8b93a7; --mono:ui-monospace,'JetBrains Mono','Fira Code',Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--text);font:15px/1.55 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
+body{min-height:100vh;display:flex;flex-direction:column}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+button{font:inherit;cursor:pointer;border:none;border-radius:8px}
+input,select{font:inherit;color:var(--text);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;width:100%}
+input:focus,select:focus{outline:2px solid var(--accent-dim);outline-offset:1px}
+.wrap{width:min(1080px,94vw);margin:0 auto}
+header{border-bottom:1px solid var(--border);background:linear-gradient(180deg,#0e1220,#0b0e14)}
+header .wrap{display:flex;align-items:center;gap:12px;padding:14px 0}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;letter-spacing:.2px}
+.brand svg{flex:none}
+.brand small{color:var(--muted);font-weight:400}
+.spacer{flex:1}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:99px;font-size:12.5px;border:1px solid var(--border);background:var(--surface);color:var(--muted)}
+.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.pill.online{color:var(--ok);border-color:#1d4b33}.pill.online .dot{background:var(--ok)}
+.pill.offline{color:var(--bad);border-color:#4b1d1d}.pill.offline .dot{background:var(--bad)}
+.iconbtn{background:var(--surface);border:1px solid var(--border);color:var(--muted);padding:8px 11px;border-radius:8px}
+.iconbtn:hover{color:var(--text);background:var(--surface2)}
+#banner{display:none;background:#2b2410;border-bottom:1px solid #4a3c12;color:var(--warn);padding:10px 0;font-size:13.5px}
+#banner .wrap{display:flex;gap:10px;align-items:center}
+main{flex:1;padding:26px 0 40px}
+nav.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:22px;border-bottom:1px solid var(--border);padding-bottom:0}
+nav.tabs button{background:none;color:var(--muted);padding:10px 16px;border-radius:8px 8px 0 0;border-bottom:2px solid transparent;font-weight:600}
+nav.tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent);background:linear-gradient(180deg,transparent,#141a2b)}
+.panel{display:none}.panel.active{display:block}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px}
+.card h2{font-size:16px;margin-bottom:6px}
+.sub{color:var(--muted);font-size:13.5px;margin-bottom:14px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.row .grow{flex:1;min-width:240px}
+label.fl{display:block;font-size:12.5px;color:var(--muted);margin:0 0 6px 2px;font-weight:600;letter-spacing:.3px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.chip{display:inline-flex;gap:7px;align-items:center;padding:7px 13px;border-radius:99px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font-size:13px;font-weight:600;transition:.15s}
+.chip[aria-pressed="true"]{border-color:var(--accent-dim);color:var(--text);background:#1d1a33}
+.chip.off{opacity:.45}
+.chip small{font-weight:400;color:var(--warn)}
+.scanbtn{background:linear-gradient(135deg,var(--accent-dim),var(--accent));color:#fff;font-weight:700;padding:11px 26px;border-radius:9px;font-size:15px}
+.scanbtn:hover{filter:brightness(1.1)}
+.scanbtn:disabled{opacity:.5;cursor:not-allowed}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid #ffffff55;border-top-color:#fff;border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.note{font-size:12.5px;color:var(--muted);margin-top:10px}
+.note code,.hint{font-family:var(--mono);font-size:12px;color:var(--muted);background:#0d1119;padding:2px 6px;border-radius:5px}
+.toggle{display:inline-flex;gap:8px;align-items:center;font-size:13px;color:var(--muted);cursor:pointer}
+.toggle input{width:auto}
+/* job view */
+.jobhead{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.jobhead .val{font-family:var(--mono);font-size:17px;font-weight:700}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:99px;font-size:12px;font-weight:700;border:1px solid var(--border);color:var(--muted)}
+.badge.running{color:var(--accent);border-color:#33308a}.badge.running .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:pulse 1.2s infinite}
+.badge.done{color:var(--ok);border-color:#1d4b33}
+.badge.error{color:var(--bad);border-color:#4b1d1d}
+.badge.queued{color:var(--muted)}
+@keyframes pulse{50%{opacity:.3}}
+.ghost{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:8px 14px;font-size:13px;font-weight:600}
+.ghost:hover{border-color:var(--accent-dim)}
+.toolcard{border:1px solid var(--border);border-radius:10px;margin-bottom:10px;overflow:hidden;background:var(--surface2)}
+.toolcard>button.tc{width:100%;display:flex;align-items:center;gap:10px;background:none;color:var(--text);padding:12px 15px;text-align:left;font-weight:700}
+.toolcard>button.tc:hover{background:#1f2740}
+.toolcard .tstat{font-size:12px;color:var(--muted);font-weight:400}
+.toolcard .cnt{margin-left:auto;color:var(--ok);font-family:var(--mono)}
+.tcbody{display:none;border-top:1px solid var(--border);padding:13px 15px}
+.toolcard.open .tcbody{display:block}
+.foundlist{display:grid;gap:6px;margin-bottom:12px}
+.found{display:flex;gap:10px;align-items:baseline;font-size:13.5px}
+.found .site{color:var(--muted);min-width:130px}
+.found a,.found span.val{font-family:var(--mono);font-size:12.5px;word-break:break-all}
+.log{background:#05070c;border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:12px;color:#9aa3b8;max-height:260px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+.log .lplus{color:var(--ok)}.log .lerr{color:var(--bad)}
+/* tools grid */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.tcard{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:16px}
+.tcard h3{font-size:15px;display:flex;align-items:center;gap:9px}
+.tcard p{color:var(--muted);font-size:13px;margin:8px 0 12px}
+.inst{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:99px}
+.inst.yes{color:var(--ok);border:1px solid #1d4b33}.inst.no{color:var(--warn);border:1px solid #4a3c12}
+.kind{font-size:10.5px;color:var(--muted);border:1px solid var(--border);padding:2px 8px;border-radius:99px;font-weight:700;letter-spacing:.5px}
+/* recent */
+.recent-row{display:flex;gap:12px;align-items:center;padding:11px 14px;border:1px solid var(--border);border-radius:9px;margin-bottom:8px;background:var(--surface2);cursor:pointer;font-size:14px}
+.recent-row:hover{border-color:var(--accent-dim)}
+.recent-row .rv{font-family:var(--mono);font-size:13px}
+.recent-row .rt{margin-left:auto;font-size:12px;color:var(--muted)}
+/* dialog & toast */
+dialog{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:14px;padding:24px;width:min(460px,92vw)}
+dialog::backdrop{background:#000a}
+dialog h3{margin-bottom:14px;font-size:17px}
+dialog .fld{margin-bottom:14px}
+#toasts{position:fixed;top:18px;right:18px;display:flex;flex-direction:column;gap:9px;z-index:99}
+.toast{background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--accent);padding:11px 16px;border-radius:9px;font-size:13.5px;box-shadow:0 6px 24px #0008;max-width:340px}
+.toast.err{border-left-color:var(--bad)}
+footer{border-top:1px solid var(--border);padding:18px 0;color:var(--muted);font-size:12.5px;text-align:center}
+footer .wrap{display:flex;flex-direction:column;gap:4px}
+@media(max-width:640px){.found .site{min-width:90px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="brand">
+      <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="none" stroke="#8b7bff" stroke-width="2"/><path d="M16 24c-4 0-7-3-7-7m7 7c4 0 7-3 7-7M16 24v-5m-5 2c-3 0-5-2-5-5m15 5c3 0 5-2 5-5" fill="none" stroke="#8b7bff" stroke-width="1.6" stroke-linecap="round"/></svg>
+      qalarc <small>· OSINT Hub</small>
+    </div>
+    <div class="spacer"></div>
+    <span class="pill" id="statusPill"><span class="dot"></span><span id="statusText">checking…</span></span>
+    <button class="iconbtn" id="settingsBtn" aria-label="Settings" title="Settings (API base URL, token)">&#9881;</button>
+  </div>
+</header>
+<div id="banner"><div class="wrap"><span>&#9888;</span><span>Backend not reachable — run <code>scripts/setup.sh</code> then <code>scripts/run.sh</code> from the qalarc_osint repo, or set the API URL in Settings.</span></div></div>
+
+<main><div class="wrap">
+<nav class="tabs" role="tablist" aria-label="Scan types">
+  <button role="tab" aria-selected="true" data-tab="username">Username</button>
+  <button role="tab" aria-selected="false" data-tab="phone">Phone</button>
+  <button role="tab" aria-selected="false" data-tab="dating">Dating</button>
+  <button role="tab" aria-selected="false" data-tab="tools">Tools</button>
+  <button role="tab" aria-selected="false" data-tab="recent">Recent</button>
+</nav>
+
+<section class="panel active" id="panel-username" role="tabpanel">
+  <div class="card">
+    <h2>Username exposure scan</h2>
+    <p class="sub">Check a username across hundreds of platforms. Runs locally-installed scanners; results stream live.</p>
+    <div class="row">
+      <div class="grow"><label class="fl" for="uval">USERNAME</label><input id="uval" placeholder="e.g. torvalds" autocomplete="off" maxlength="64"></div>
+      <div><label class="fl" for="utimeout">TIMEOUT</label>
+        <select id="utimeout"><option>5</option><option selected>10</option><option>20</option></select></div>
+      <div style="align-self:flex-end"><button class="scanbtn" id="uscan">Scan</button></div>
+    </div>
+    <div class="chips" id="uchips" role="group" aria-label="Tools for username scan"></div>
+    <p class="note" id="ulast"></p>
+  </div>
+</section>
+
+<section class="panel" id="panel-phone" role="tabpanel">
+  <div class="card">
+    <h2>Phone number scan</h2>
+    <p class="sub">Phone intelligence (carrier, validity, reputation) and account-registration checks. Use international format.</p>
+    <div class="row">
+      <div class="grow"><label class="fl" for="pval">PHONE (E.164)</label><input id="pval" type="tel" placeholder="+61 425 228 338" autocomplete="off"></div>
+      <div style="align-self:flex-end"><button class="scanbtn" id="pscan">Scan</button></div>
+    </div>
+    <div class="chips" id="pchips" role="group" aria-label="Tools for phone scan"></div>
+  </div>
+</section>
+
+<section class="panel" id="panel-dating" role="tabpanel">
+  <div class="card">
+    <h2>Dating platform scan</h2>
+    <p class="sub">Runs <strong>maigret</strong> — its site database verifiably covers Tinder, Badoo, MeetMe, AdultFriendFinder and more. <strong>Responsible use only.</strong></p>
+    <div class="row">
+      <div class="grow"><label class="fl" for="dval">USERNAME</label><input id="dval" placeholder="username to check on dating platforms" autocomplete="off" maxlength="64"></div>
+      <div style="align-self:flex-end"><button class="scanbtn" id="dscan">Scan</button></div>
+    </div>
+    <label class="toggle" style="margin-top:10px"><input type="checkbox" id="dfilter" checked> show only dating sites in results</label>
+    <p class="note">Full maigret scans take several minutes (3000+ sites). A dating-site filter is applied to results for focus. Checking real people without a legitimate, lawful purpose may be unlawful in your jurisdiction.</p>
+  </div>
+</section>
+
+<section class="panel" id="panel-tools" role="tabpanel">
+  <div class="card"><h2>Scanner tools</h2><p class="sub">Installed state of the backend's scanners. Not-installed tools show their setup hint.</p></div>
+  <div class="grid" id="toolgrid"></div>
+</section>
+
+<section class="panel" id="panel-recent" role="tabpanel">
+  <div class="card"><h2>Recent jobs</h2><p class="sub">Jobs held in backend memory (cleared on restart). Click to reopen.</p>
+  <div id="recentlist"><p class="sub">No jobs yet.</p></div></div>
+</section>
+
+<section id="jobview" style="display:none">
+  <div class="jobhead">
+    <span class="val" id="jval"></span>
+    <span class="badge" id="jstatus"><span class="dot" id="jdot" style="display:none"></span><span id="jstatustext">—</span></span>
+    <span class="hint" id="jelapsed"></span>
+    <span class="spacer"></span>
+    <button class="ghost" id="expjson">↓ JSON</button>
+    <button class="ghost" id="expmd">↓ Markdown report</button>
+  </div>
+  <div id="toolcards"></div>
+  <div class="card"><h2 style="font-size:13px;color:var(--muted);letter-spacing:.6px">LIVE LOG</h2><div class="log" id="jlog" aria-live="polite"></div></div>
+</section>
+</div></main>
+
+<footer><div class="wrap">
+  <span>For authorized security research, exposure assessment &amp; identity verification only · <a href="https://qalarc.com">qalarc.com</a></span>
+  <span>Respect platform ToS and local privacy law (GDPR/CCPA). Not for stalking or harassment.</span>
+</div></footer>
+
+<dialog id="dlg">
+  <h3>Settings</h3>
+  <div class="fld"><label class="fl" for="sbase">API BASE URL</label><input id="sbase" placeholder="same origin — or e.g. https://osint.qalarc.com"></div>
+  <div class="fld"><label class="fl" for="stoken">BEARER TOKEN (if the API requires one)</label><input id="stoken" type="password" placeholder="optional"></div>
+  <div class="row" style="justify-content:flex-end"><button class="ghost" id="dcancel">Cancel</button><button class="scanbtn" id="dsave" style="padding:9px 20px">Save</button></div>
+</dialog>
+<div id="toasts" aria-live="assertive"></div>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const LS={base:"osint_api_base",token:"osint_token",last:"osint_last_job"};
+const DATING=["tinder.com","badoo.com","meetme.com","adultfriendfinder.com","okcupid.com","pof.com","match.com","hinge.co","bumble.com","grindr.com","feeld.co","zoosk.com","ashleymadison.com","eharmony.com"];
+const apiBase=()=>localStorage.getItem(LS.base)||"";
+const token=()=>localStorage.getItem(LS.token)||"";
+const state={tools:[],job:null,logs:[],found:{},statuses:{},sse:null,poll:null,timer:null,onlyDating:false};
+
+async function api(path,opts={}){
+  const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),15000);
+  try{
+    const h=Object.assign({"Content-Type":"application/json"},opts.headers||{});
+    if(token())h["Authorization"]="Bearer "+token();
+    const r=await fetch(apiBase()+path,{...opts,headers:h,signal:ctl.signal});
+    let body=null;try{body=await r.json()}catch(e){}
+    if(!r.ok){const err=new Error((body&&(body.error||body.detail))||("HTTP "+r.status));err.status=r.status;throw err}
+    return body;
+  }finally{clearTimeout(t)}
+}
+function toast(msg,err){const d=document.createElement("div");d.className="toast"+(err?" err":"");d.textContent=msg;$("toasts").appendChild(d);setTimeout(()=>d.remove(),5000)}
+function esc(s){return s==null?"":String(s)}
+
+/* ---------- health & tools ---------- */
+async function health(){
+  const pill=$("statusPill"),txt=$("statusText");
+  try{const h=await api("/api/health");
+    pill.className="pill online";txt.textContent="API online · "+h.tools_installed+" tools";
+    $("banner").style.display="none";return true;
+  }catch(e){pill.className="pill offline";txt.textContent="offline";
+    $("banner").style.display="block";return false}
+}
+async function loadTools(){
+  try{const r=await api("/api/tools");state.tools=r.tools||[]}
+  catch(e){state.tools=[]}
+  renderChips("username","uchips");renderChips("phone","pchips");renderToolGrid();
+}
+function renderChips(kind,elId){
+  const box=$(elId);box.innerHTML="";
+  state.tools.filter(t=>t.kind===kind).forEach(t=>{
+    const b=document.createElement("button");b.className="chip"+(t.installed?"":" off");
+    b.setAttribute("aria-pressed",t.installed?"true":"false");
+    b.title=t.installed?t.description:("not installed — "+t.hint);
+    b.appendChild(document.createTextNode(t.name));
+    if(!t.installed){const s=document.createElement("small");s.textContent="not installed";b.appendChild(s)}
+    b.addEventListener("click",()=>{if(!t.installed){toast(t.name+" is not installed on the backend",true);return}
+      b.setAttribute("aria-pressed",b.getAttribute("aria-pressed")==="true"?"false":"true")});
+    box.appendChild(b);
+  });
+}
+function renderToolGrid(){
+  const g=$("toolgrid");g.innerHTML="";
+  state.tools.forEach(t=>{
+    const c=document.createElement("div");c.className="tcard";
+    const h=document.createElement("h3");h.textContent=t.name;
+    const k=document.createElement("span");k.className="kind";k.textContent=t.kind;h.appendChild(k);
+    const inst=document.createElement("span");inst.className="inst "+(t.installed?"yes":"no");
+    inst.textContent=t.installed?"installed":"not installed";h.appendChild(inst);
+    c.appendChild(h);
+    const p=document.createElement("p");p.textContent=t.description;c.appendChild(p);
+    if(!t.installed){const hint=document.createElement("div");hint.className="hint";hint.textContent=t.hint;c.appendChild(hint)}
+    g.appendChild(c);
+  });
+}
+
+/* ---------- scanning ---------- */
+function selectedTools(elId){return Array.from($(elId).querySelectorAll('.chip[aria-pressed="true"]')).map(c=>c.firstChild.textContent.toLowerCase())}
+async function submitScan(type,value,tools,options){
+  if(!tools.length){toast("Select at least one tool",true);return}
+  try{
+    const r=await api("/api/scan",{method:"POST",body:JSON.stringify({type,value,tools,options})});
+    localStorage.setItem(LS.last,r.job_id);
+    openJob(r.job_id);
+  }catch(e){toast(e.message||"scan failed",e.status===429||e.status===401||e.status===400)}
+}
+$("uscan").addEventListener("click",()=>{const v=$("uval").value.trim();if(!v){toast("Enter a username",true);return}
+  submitScan("username",v,selectedTools("uchips"),{timeout:+$("utimeout").value})});
+$("uval").addEventListener("keydown",e=>{if(e.key==="Enter")$("uscan").click()});
+$("pscan").addEventListener("click",()=>{const v=$("pval").value.trim();if(!v){toast("Enter a phone number",true);return}
+  submitScan("phone",v,selectedTools("pchips"),{timeout:10})});
+$("pval").addEventListener("keydown",e=>{if(e.key==="Enter")$("pscan").click()});
+$("dscan").addEventListener("click",()=>{const v=$("dval").value.trim();if(!v){toast("Enter a username",true);return}
+  state.onlyDating=$("dfilter").checked;
+  submitScan("username",v,["maigret"],{timeout:20})});
+$("dval").addEventListener("keydown",e=>{if(e.key==="Enter")$("dscan").click()});
+
+/* ---------- job view ---------- */
+function stopLive(){if(state.sse){state.sse.close();state.sse=null}if(state.poll){clearInterval(state.poll);state.poll=null}if(state.timer){clearInterval(state.timer);state.timer=null}}
+async function openJob(id){
+  stopLive();state.logs=[];state.found={};state.statuses={};state.job=null;
+  $("jobview").style.display="block";$("jobview").scrollIntoView({behavior:"smooth"});
+  $("jval").textContent="job "+id;
+  try{const snap=await api("/api/jobs/"+id);applySnapshot(snap)}
+  catch(e){toast(e.message,true);return}
+  if(state.job&&["queued","running"].includes(state.job.status))startLive(id);
+}
+function startLive(id){
+  $("jdot").style.display="";setBadge(state.job.status);
+  state.timer=setInterval(()=>{if(state.job){const el=(state.job.finished_at||Date.now()/1000)-state.job.created_at;
+    $("jelapsed").textContent=Math.max(0,Math.round(el))+"s"}},1000);
+  if(!token()&&typeof EventSource!=="undefined"){
+    const es=new EventSource(apiBase()+"/api/jobs/"+id+"/stream");state.sse=es;
+    es.addEventListener("snapshot",e=>{const d=JSON.parse(e.data);d.id||(d.id=id);applySnapshot(d)});
+    es.addEventListener("log",e=>{const d=JSON.parse(e.data);pushLog("["+d.tool+"] "+d.line)});
+    es.addEventListener("found",e=>{const d=JSON.parse(e.data);(state.found[d.tool]=state.found[d.tool]||[]).push(d.item);renderToolCards()});
+    es.addEventListener("tool_done",e=>{const d=JSON.parse(e.data);state.statuses[d.tool]={status:d.status,count:d.found_count};renderToolCards()});
+    es.addEventListener("job_done",e=>{const d=JSON.parse(e.data);state.job.status=d.status;state.job.finished_at=Date.now()/1000;finalize()});
+    es.onerror=()=>{es.close();state.sse=null;pollLoop(id)};
+  }else pollLoop(id);
+}
+function pollLoop(id){state.poll=setInterval(async()=>{try{const snap=await api("/api/jobs/"+id);applySnapshot(snap);
+  if(["done","error"].includes(snap.status))finalize()}catch(e){}},1500)}
+function finalize(){stopLive();$("jdot").style.display="none";if(state.job)setBadge(state.job.status);loadRecent()}
+function applySnapshot(j){
+  state.job=j;
+  if(j.value)$("jval").textContent=j.value;
+  setBadge(j.status);
+  (j.results||[]).forEach(r=>{state.statuses[r.tool]={status:r.status,count:(r.found||[]).length};
+    state.found[r.tool]=r.found||[]});
+  if(j.log_tail){state.logs=j.log_tail.split("\n")}
+  renderToolCards();renderLog();
+}
+function setBadge(s){const b=$("jstatus"),t=$("jstatustext");b.className="badge "+s;t.textContent=s;
+  if(s==="running"){$("jdot").style.display=""}else{$("jdot").style.display="none"}}
+function renderToolCards(){
+  const box=$("toolcards");box.innerHTML="";
+  const names=Object.keys(state.statuses);if(!names.length&&state.job)names.push(...(state.job.results||[]).map(r=>r.tool));
+  names.forEach(name=>{
+    const st=state.statuses[name]||{status:"pending",count:0};
+    const card=document.createElement("div");card.className="toolcard"+(st.status==="running"?" open":"");
+    const btn=document.createElement("button");btn.className="tc";
+    btn.appendChild(document.createTextNode(name));
+    const ts=document.createElement("span");ts.className="tstat";ts.textContent="· "+st.status;btn.appendChild(ts);
+    const cnt=document.createElement("span");cnt.className="cnt";cnt.textContent=st.count+" found";btn.appendChild(cnt);
+    btn.addEventListener("click",()=>card.classList.toggle("open"));
+    card.appendChild(btn);
+    const body=document.createElement("div");body.className="tcbody";
+    const list=document.createElement("div");list.className="foundlist";
+    (state.found[name]||[]).filter(it=>{
+      if(!(state.onlyDating&&name==="maigret"))return true;
+      try{return DATING.some(d=>new URL(it.url).hostname.endsWith(d))}catch(e){return false}
+    }).forEach(it=>{
+      const row=document.createElement("div");row.className="found";
+      const s=document.createElement("span");s.className="site";s.textContent=it.site||"—";row.appendChild(s);
+      if(it.url){const a=document.createElement("a");a.href=it.url;a.target="_blank";a.rel="noopener noreferrer";a.textContent=it.url;row.appendChild(a)}
+      else{const v=document.createElement("span");v.className="val";v.textContent="registered";row.appendChild(v)}
+      list.appendChild(row);
+    });
+    if(!list.children.length){const p=document.createElement("p");p.className="sub";p.textContent="No matches surfaced yet.";list.appendChild(p)}
+    body.appendChild(list);
+    const log=document.createElement("div");log.className="log";
+    state.logs.filter(l=>l.startsWith("["+name+"]")).forEach(l=>appendLine(log,l));
+    body.appendChild(log);card.appendChild(body);box.appendChild(card);
+  });
+}
+function pushLog(line){state.logs.push(line);
+  const el=$("jlog");const stick=el.scrollHeight-el.scrollTop-el.clientHeight<50;appendLine(el,line);if(stick)el.scrollTop=el.scrollHeight;
+  const open=document.querySelector(".toolcard.open .log");if(open&&open!==el){appendLine(open,line);open.scrollTop=open.scrollHeight}}
+function appendLine(el,line){const d=document.createElement("div");if(line.includes("[+]"))d.className="lplus";else if(line.includes("[-]")||line.includes("ERROR"))d.className="lerr";d.textContent=line;el.appendChild(d);while(el.children.length>2000)el.removeChild(el.firstChild)}
+function renderLog(){const el=$("jlog");el.innerHTML="";state.logs.slice(-2000).forEach(l=>appendLine(el,l));el.scrollTop=el.scrollHeight}
+
+/* ---------- exports ---------- */
+function jobData(){const out={target:state.job&&state.job.value,type:state.job&&state.job.type,generated:new Date().toISOString(),tools:{}};
+  Object.keys(state.found).forEach(t=>out.tools[t]=state.found[t]);return out}
+function download(name,text,type){const b=new Blob([text],{type});const u=URL.createObjectURL(b);
+  const a=document.createElement("a");a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),4000)}
+$("expjson").addEventListener("click",()=>{if(!state.job)return;download("osint-report.json",JSON.stringify(jobData(),null,2),"application/json")});
+$("expmd").addEventListener("click",()=>{if(!state.job)return;const d=jobData();
+  let md="# OSINT Report\n\n**Target:** `"+d.target+"` ("+d.type+")  \n**Generated:** "+d.generated+"\n";
+  Object.entries(d.tools).forEach(([t,items])=>{md+="\n## "+t+" — "+items.length+" found\n";
+    if(!items.length){md+="_no matches_\n";return}
+    md+="| Site | URL |\n|---|---|\n";items.forEach(i=>{md+="| "+(i.site||"—")+" | "+(i.url?("["+i.url+"]("+i.url+")"):"registered")+" |\n"})});
+  download("osint-report.md",md,"text/markdown")});
+
+/* ---------- recent ---------- */
+async function loadRecent(){try{const r=await api("/api/jobs?limit=15");const box=$("recentlist");box.innerHTML="";
+  if(!(r.jobs||[]).length){box.innerHTML='<p class="sub">No jobs yet.</p>';return}
+  r.jobs.forEach(j=>{const row=document.createElement("div");row.className="recent-row";
+    const v=document.createElement("span");v.className="rv";v.textContent=j.value;row.appendChild(v);
+    const s=document.createElement("span");s.className="badge "+j.status;s.textContent=j.status;row.appendChild(s);
+    const t=document.createElement("span");t.className="rt";t.textContent=new Date(j.created_at*1000).toLocaleTimeString();row.appendChild(t);
+    row.addEventListener("click",()=>openJob(j.id));box.appendChild(row)})}catch(e){}}
+async function offerResume(){const id=localStorage.getItem(LS.last);if(!id)return;
+  try{const j=await api("/api/jobs/"+id);if(j){$("ulast").innerHTML="";
+    const a=document.createElement("button");a.className="ghost";a.textContent="resume last job ("+j.value+")";
+    a.addEventListener("click",()=>openJob(id));$("ulast").appendChild(a)}}catch(e){}}
+
+/* ---------- tabs & settings ---------- */
+document.querySelectorAll("nav.tabs button").forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll("nav.tabs button").forEach(x=>x.setAttribute("aria-selected","false"));
+  b.setAttribute("aria-selected","true");
+  document.querySelectorAll(".panel").forEach(p=>p.classList.remove("active"));
+  $("panel-"+b.dataset.tab).classList.add("active");
+  if(b.dataset.tab==="recent")loadRecent();
+}));
+const dlg=$("dlg");
+$("settingsBtn").addEventListener("click",()=>{$("sbase").value=apiBase();$("stoken").value=token();dlg.showModal()});
+$("dcancel").addEventListener("click",()=>dlg.close());
+$("dsave").addEventListener("click",()=>{const b=$("sbase").value.trim();
+  b?localStorage.setItem(LS.base,b):localStorage.removeItem(LS.base);
+  $("stoken").value?localStorage.setItem(LS.token,$("stoken").value):localStorage.removeItem(LS.token);
+  dlg.close();health().then(ok=>{if(ok)loadTools()})});
+
+/* ---------- init ---------- */
+(async()=>{const ok=await health();await loadTools();if(ok){offerResume();loadRecent()}})();
+</script>
+</body>
+</html>

@@ -1,0 +1,2359 @@
+<!DOCTYPE html>
+<!--
+  qalarc · OSINT HUB — detective-intelligence dossier UI
+  Art language: "steddi" engineering-drawing blueprint (fine grid, dimension
+  lines, datum crosshairs, mono annotations, 655 nm laser, red/maroon signal).
+
+  Single self-contained file: all CSS + JS inline, zero external requests,
+  no frameworks, no build step, no font loading (system stacks only).
+  Talk to the qalarc_osint backend same-origin, or point Settings at any
+  instance (localStorage keys: osint_api_base, osint_token, osint_last_job).
+
+  Replaces index_agent_v1 (archived at archive/index_agent_v1_20260906.html).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0b0d">
+<meta name="description" content="qalarc OSINT Hub — username, phone, email and dating-platform footprint scanning for authorized investigations.">
+<title>qalarc · OSINT Hub — Case Intake</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f0b0d'/%3E%3Cg fill='none' stroke='%23d94a3d' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M5 16.2C5 10.1 9.9 5.2 16 5.2s11 4.9 11 11c0 2.3-.3 4.5-.9 6.6'/%3E%3Cpath d='M9.3 18.4A7.4 7.4 0 0 1 8.6 15c0-4.1 3.3-7.4 7.4-7.4s7.4 3.3 7.4 7.4c0 2.6-.3 5.1-.8 7.5'/%3E%3Cpath d='M13 19.9c-.4-1.6-.6-3.4-.6-5.2 0-2 1.6-3.6 3.6-3.6s3.6 1.6 3.6 3.6c0 3.9-.4 7.7-1.2 11.3'/%3E%3Cpath d='M16 14.2v7.5'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+/* ============================================================================
+   STEDDI × QALARC OSINT — "case intake blueprint"
+   Palette: red / maroon signal. Engineering drawing: fine grid, dimension
+   lines, datum crosshairs, mono annotations, 655 nm laser scanline.
+   ========================================================================= */
+
+/* ---------- 1. tokens ---------- */
+:root{
+  --bg:#0f0b0d;
+  --bg-2:#140e11;
+  --surface:#191217;
+  --surface-2:#20161c;
+  --line:#2c1f26;
+  --line-2:#3d2a33;
+  --ink:#f1e8e6;
+  --ink-2:#d9cbc8;
+  --muted:#a59195;
+  --maroon:#7c2736;
+  --maroon-deep:#5a1c28;
+  --red:#d94a3d;
+  --red-bright:#ff6a55;
+  --laser:#ff3b2f;
+  --red-soft:rgba(217,74,61,.14);
+  --red-glow:rgba(255,59,47,.12);
+  --accent-grad:linear-gradient(135deg,#a93546,#d94a3d);
+  --text-grad:linear-gradient(100deg,var(--red),var(--red-bright));
+  --sans:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --display:'Sora','Inter',system-ui,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;
+  --wrap:1120px;
+  --prose:68ch;
+  --banner-h:28px;
+  --nav-h:56px;
+  --r:10px;
+  --ease:cubic-bezier(.22,.61,.36,1);
+}
+
+/* ---------- 2. reset / base ---------- */
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%;color-scheme:dark}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--ink);
+  font:400 15px/1.62 var(--sans);
+  font-feature-settings:"kern" 1,"liga" 1;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+  min-height:100vh;
+  display:flex;flex-direction:column;
+}
+img,svg{display:block;max-width:100%}
+a{color:inherit}
+h1,h2,h3,h4{font-family:var(--display);font-weight:600;line-height:1.18;letter-spacing:-.015em;margin:0}
+p{margin:0 0 1em}
+ul,ol{margin:0;padding:0;list-style:none}
+table{border-collapse:collapse;width:100%}
+::selection{background:var(--red-soft);color:var(--ink)}
+:focus-visible{outline:2px solid var(--red);outline-offset:3px;border-radius:3px}
+.mono{font-family:var(--mono)}
+.muted{color:var(--muted)}
+.small{font-size:12.5px}
+.micro{font-size:12px;color:var(--muted);margin:7px 0 0;line-height:1.55}
+.skip-link{position:absolute;left:-9999px;top:0;background:var(--maroon-deep);color:#fff;padding:8px 14px;border-radius:8px;z-index:400;font-weight:600;text-decoration:none}
+.skip-link:focus{left:12px;top:12px}
+
+/* ---------- 3. blueprint background layers ---------- */
+/* (a) fine grid: 8px minor cream 3% + 96px major red 6%, slow diagonal drift */
+.bp-grid{
+  position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:
+    linear-gradient(rgba(241,232,230,.03) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(241,232,230,.03) 1px,transparent 1px),
+    linear-gradient(rgba(217,74,61,.06) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(217,74,61,.06) 1px,transparent 1px);
+  background-size:8px 8px,8px 8px,96px 96px,96px 96px;
+  animation:bpdrift 30s linear infinite;
+}
+@keyframes bpdrift{to{background-position:8px 8px,8px 8px,96px 96px,96px 96px}}
+
+/* (b) radial vignette pools so the grid fades at the edges */
+.bp-vignette{
+  position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(900px 520px at 74% 4%,var(--red-glow),transparent 68%),
+    radial-gradient(720px 460px at 6% 90%,rgba(124,39,54,.14),transparent 70%),
+    radial-gradient(120% 90% at 50% 40%,transparent 40%,rgba(15,11,13,.72) 100%);
+}
+
+/* (c) film grain — inline-SVG feTurbulence */
+.bp-grain{
+  position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.05;
+  mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* (d) datum crosshairs — "+" marks scattered on the sheet */
+.bp-datum{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.08}
+.bp-datum i{position:absolute;width:12px;height:12px;display:block}
+.bp-datum i::before,.bp-datum i::after{content:"";position:absolute;background:var(--red)}
+.bp-datum i::before{left:0;top:5.5px;width:12px;height:1px}
+.bp-datum i::after{top:0;left:5.5px;height:12px;width:1px}
+
+/* (e) fixed mono annotations — blueprint margin notes */
+.bp-note{
+  position:fixed;z-index:1;pointer-events:none;
+  font:400 9.5px/1 var(--mono);letter-spacing:.22em;text-transform:uppercase;
+  color:var(--red-bright);opacity:.28;white-space:nowrap;
+}
+.bp-note.v{writing-mode:vertical-rl}
+
+/* (f) the 655 nm laser scanline — 2px beam sweeping the viewport, 11s */
+.laser{
+  position:fixed;left:0;right:0;top:0;height:2px;z-index:55;pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(255,59,47,0) 6%,var(--laser) 48%,rgba(255,59,47,.9) 52%,transparent 94%,transparent);
+  box-shadow:0 0 14px rgba(255,59,47,.5),0 0 34px rgba(255,59,47,.2);
+  opacity:0;
+  animation:laserPage 11s linear infinite;
+}
+@keyframes laserPage{
+  0%{transform:translateY(-4vh);opacity:0}
+  5%{opacity:.55}
+  90%{opacity:.55}
+  100%{transform:translateY(104vh);opacity:0}
+}
+
+/* (g) laser-tracker crosshair HUD + coordinate chip following the pointer */
+.xh{position:fixed;inset:0;z-index:55;pointer-events:none;display:none}
+.xh .lx,.xh .ly{position:absolute;background:var(--red);opacity:.38;
+  box-shadow:0 0 6px rgba(255,59,47,.45)}
+.xh .lx{left:0;right:0;height:1px;top:0}
+.xh .ly{top:0;bottom:0;width:1px;left:0}
+.xh .xl{
+  position:absolute;left:0;top:0;
+  font:600 10px/1 var(--mono);letter-spacing:.14em;
+  color:var(--red-bright);white-space:nowrap;
+  background:rgba(15,11,13,.78);border:1px solid rgba(217,74,61,.45);
+  border-radius:4px;padding:4px 7px;transform:translate(16px,18px);
+}
+@media (hover:hover) and (pointer:fine){.xh{display:block}}
+
+/* (h) soft red laser pool that follows the pointer */
+.bp-spot{
+  position:fixed;left:0;top:0;width:560px;height:560px;z-index:1;
+  pointer-events:none;border-radius:50%;margin:-280px 0 0 -280px;
+  background:radial-gradient(circle,
+    rgba(255,59,47,.085) 0%,rgba(217,74,61,.05) 34%,transparent 68%);
+  will-change:transform;
+}
+@media (hover:none),(pointer:coarse){.bp-spot{display:none}}
+
+/* ---------- 4. dimension lines (section dividers) ---------- */
+.dim{position:relative;height:26px;margin:30px 0 34px;pointer-events:none;opacity:.55}
+.dim::before{content:"";position:absolute;left:0;right:0;top:12px;height:1px;background:var(--red);opacity:.34}
+.dim .tick{position:absolute;top:2px;width:1px;height:20px;background:var(--red);opacity:.4}
+.dim .tick.l{left:0}
+.dim .tick.r{right:0}
+.dim .arw{position:absolute;top:7px;width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent}
+.dim .arw.l{left:1px;border-right:9px solid var(--red);opacity:.4}
+.dim .arw.r{right:1px;border-left:9px solid var(--red);opacity:.4}
+.dim .val{
+  position:absolute;left:50%;top:-2px;transform:translateX(-50%);
+  background:var(--bg);padding:0 10px;
+  font:400 10px/1 var(--mono);letter-spacing:.2em;color:var(--red-bright);opacity:.62;text-transform:uppercase;
+}
+
+/* ---------- 5. classification banner + header ---------- */
+header.cia{
+  position:sticky;top:0;z-index:80;
+  background:rgba(15,11,13,.9);
+  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--line);
+}
+.cia-banner{
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  height:var(--banner-h);
+  background:rgba(124,39,54,.18);
+  border-bottom:1px solid var(--line);
+  font:400 9.5px/1 var(--mono);letter-spacing:.3em;text-transform:uppercase;
+  color:var(--red-bright);
+}
+.cia-banner .sep{color:var(--muted);letter-spacing:0}
+.cia-nav{
+  max-width:var(--wrap);margin:0 auto;height:var(--nav-h);
+  padding:0 26px;display:flex;align-items:center;gap:14px;
+}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto;min-width:0;text-decoration:none}
+.brand .logo{flex:none}
+.wordmark{font-family:var(--display);font-size:15px;font-weight:700;letter-spacing:-.01em;white-space:nowrap;color:var(--ink)}
+.wordmark .sep{color:var(--red);margin:0 5px;font-weight:400}
+.wordmark .sub{color:var(--muted);font-weight:600}
+.top-actions{display:flex;align-items:center;gap:10px}
+.pill{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:6px 12px;border-radius:999px;cursor:pointer;
+  font:600 10.5px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;
+  border:1px solid var(--line-2);background:var(--surface);color:var(--muted);
+  transition:border-color .18s var(--ease),color .18s var(--ease);
+}
+.pill:hover{border-color:var(--red);color:var(--ink-2)}
+.pill .pdot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--muted)}
+.pill-online{color:var(--ink);border-color:rgba(217,74,61,.45);background:rgba(217,74,61,.08)}
+.pill-online .pdot{background:var(--red-bright);box-shadow:0 0 8px rgba(255,106,85,.8)}
+.pill-offline{border-color:rgba(124,39,54,.5)}
+.pill-offline .pdot{background:var(--maroon)}
+.pill-checking .pdot{animation:pulse 1.6s ease-in-out infinite}
+.icon-btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:34px;height:34px;border-radius:9px;cursor:pointer;
+  border:1px solid var(--line-2);background:var(--surface);color:var(--muted);
+  transition:color .18s var(--ease),border-color .18s var(--ease);
+}
+.icon-btn:hover{color:var(--red-bright);border-color:var(--red)}
+
+/* ---------- 6. offline banner ---------- */
+.banner{
+  position:relative;z-index:2;
+  display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;justify-content:center;
+  width:100%;padding:10px 20px;text-align:center;line-height:1.7;
+  background:rgba(124,39,54,.14);
+  border-bottom:1px solid rgba(217,74,61,.35);
+  color:var(--ink-2);font-size:13px;
+}
+.banner b{color:var(--red-bright);font-weight:600}
+.banner code{
+  font-family:var(--mono);font-size:11.5px;
+  background:rgba(217,74,61,.1);
+  border:1px solid rgba(217,74,61,.3);
+  border-radius:6px;padding:1px 6px;
+}
+
+/* ---------- 7. layout / hero ---------- */
+main{flex:1;width:100%;position:relative;z-index:2}
+.wrap{max-width:var(--wrap);margin:0 auto;padding:0 26px 60px;position:relative}
+.hero{position:relative;padding:44px 0 8px;overflow:visible}
+.hero-kicker{
+  font:400 11px/1 var(--mono);letter-spacing:.3em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;
+}
+.hero-kicker b{color:var(--red);font-weight:400}
+.hero h1{font-size:clamp(28px,4vw,42px);margin-bottom:14px;letter-spacing:-.02em}
+.hero h1 .grad{background:var(--text-grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero .lede{font-size:16px;color:var(--ink-2);max-width:var(--prose);margin:0}
+.stamp{
+  position:absolute;right:6px;top:40px;
+  font:600 12px/1 var(--mono);letter-spacing:.3em;text-transform:uppercase;
+  color:var(--red-bright);opacity:.6;
+  border:1px solid rgba(217,74,61,.55);
+  box-shadow:0 0 0 3px rgba(15,11,13,.6),0 0 0 4px rgba(217,74,61,.3);
+  padding:9px 14px 9px 17px;transform:rotate(-7deg);
+  pointer-events:none;user-select:none;
+}
+
+/* ---------- 8. tabs — dossier sheets ---------- */
+.tabs{
+  display:flex;gap:2px;border-bottom:1px solid var(--line);
+  margin:26px 0 26px;overflow-x:auto;scrollbar-width:thin;position:relative;z-index:2;
+}
+.tab{
+  appearance:none;background:none;border:0;cursor:pointer;
+  border-bottom:2px solid transparent;
+  color:var(--muted);font-family:var(--sans);font-size:13px;font-weight:600;
+  padding:10px 14px;position:relative;top:1px;white-space:nowrap;
+  transition:color .18s var(--ease);
+}
+.tab:hover{color:var(--ink)}
+.tab .tab-n{
+  font:400 10px/1 var(--mono);letter-spacing:.14em;color:var(--red);
+  margin-right:8px;opacity:.85;
+}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--red)}
+.tab[aria-selected="true"] .tab-n{color:var(--red-bright)}
+
+/* ---------- 9. cards / fields / chips ---------- */
+.panel{outline:none}
+.card{
+  background:rgba(25,18,23,.72);
+  border:1px solid var(--line);
+  border-radius:var(--r);
+  box-shadow:0 1px 0 rgba(255,255,255,.02),0 12px 34px rgba(2,4,10,.4);
+  padding:22px;
+}
+.scan-card{max-width:720px}
+.card h2{font-size:19px;margin:0 0 6px}
+.hint{color:var(--muted);font-size:13.5px;margin:0 0 18px;line-height:1.6;max-width:60ch}
+.field{margin-bottom:18px;min-width:0}
+.field:last-child{margin-bottom:0}
+label,.label{
+  display:block;
+  font:600 9.5px/1 var(--mono);letter-spacing:.24em;text-transform:uppercase;
+  color:var(--red-bright);margin-bottom:8px;
+}
+input[type="text"],input[type="tel"],input[type="email"],input[type="password"],select{
+  width:100%;padding:10px 12px;
+  background:#120c10;border:1px solid var(--line-2);border-radius:8px;
+  color:var(--ink);font:400 13px/1.4 var(--mono);
+  transition:border-color .18s var(--ease),box-shadow .18s var(--ease);
+}
+input:focus,select:focus{border-color:var(--red);box-shadow:0 0 0 3px rgba(217,74,61,.14);outline:none}
+input::placeholder{color:#6e565c}
+select{appearance:none;background-image:none}
+.field-row{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap}
+.field-sm{flex:0 1 auto;min-width:150px}
+.chips-label{
+  display:block;font:400 10px/1 var(--mono);letter-spacing:.22em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 8px;
+}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.chips:last-child{margin-bottom:0}
+.chip{
+  display:inline-flex;align-items:center;gap:8px;cursor:pointer;
+  padding:7px 12px;border-radius:6px;
+  border:1px solid var(--line-2);background:var(--surface);color:var(--muted);
+  font:500 10.5px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;
+  transition:border-color .18s var(--ease),color .18s var(--ease),background .18s var(--ease),box-shadow .18s var(--ease);
+}
+.chip:hover{border-color:var(--red);color:var(--ink-2)}
+.chip .dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--muted)}
+.chip-name{white-space:nowrap}
+.chip .dot.ok{background:var(--red-bright);box-shadow:0 0 6px rgba(255,106,85,.6)}
+.chip .dot.miss{background:var(--maroon);box-shadow:none}
+.chip[aria-pressed="true"]{
+  border-color:var(--red);color:var(--red-bright);
+  background:var(--red-soft);
+  box-shadow:inset 0 0 12px rgba(217,74,61,.08),0 0 0 1px rgba(217,74,61,.22);
+}
+.chip-disabled{opacity:.55;cursor:not-allowed}
+.chip-locked{cursor:default}
+
+/* ---------- 10. buttons ---------- */
+.btn{
+  display:inline-flex;align-items:center;gap:9px;cursor:pointer;text-decoration:none;
+  font-family:var(--sans);font-size:13.5px;font-weight:600;letter-spacing:.01em;
+  padding:10px 18px;border-radius:8px;border:1px solid transparent;
+  transition:transform .18s var(--ease),box-shadow .18s var(--ease),border-color .18s var(--ease),color .18s var(--ease),background .18s var(--ease);
+}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none!important}
+.btn-primary{background:var(--accent-grad);color:#fff;box-shadow:0 6px 22px rgba(169,53,70,.3)}
+.btn-primary:not(:disabled):hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(217,74,61,.4)}
+.btn-ghost{border-color:var(--line-2);color:var(--ink-2);background:rgba(25,18,23,.6)}
+.btn-ghost:not(:disabled):hover{border-color:var(--red);color:var(--red-bright)}
+.btn-xs{font-size:12px;padding:7px 12px}
+.btn-primary.busy .spinner{display:inline-block}
+.spinner{
+  display:none;width:13px;height:13px;flex:none;
+  border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;
+  animation:spin .8s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+/* ---------- 11. resume chip ---------- */
+.resume-row{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 12px;margin-bottom:18px;
+  border:1px dashed var(--line-2);border-radius:8px;
+  background:rgba(32,22,28,.45);
+}
+
+/* ---------- 12. badges ---------- */
+.badge{
+  display:inline-flex;align-items:center;gap:6px;
+  font:600 9px/1 var(--mono);letter-spacing:.18em;text-transform:uppercase;
+  padding:4px 8px;border-radius:5px;border:1px solid var(--line-2);color:var(--muted);
+}
+.badge .dot{width:6px;height:6px;border-radius:50%;flex:none}
+.badge-queued{color:var(--muted)}
+.badge-running{color:var(--red-bright);border-color:rgba(217,74,61,.5);background:var(--red-soft)}
+.badge-running .dot{background:var(--red-bright);animation:pulse 1.4s ease-in-out infinite;box-shadow:0 0 8px rgba(255,106,85,.7)}
+.badge-done{color:var(--ink);border-color:var(--maroon);background:rgba(124,39,54,.16)}
+.badge-done .dot{background:var(--red)}
+.badge-error{color:var(--laser);border-color:rgba(255,59,47,.55);background:rgba(255,59,47,.08)}
+.badge-error .dot{background:var(--laser)}
+.kind-badge,.install-badge{
+  display:inline-block;font:500 9px/1 var(--mono);letter-spacing:.18em;text-transform:uppercase;
+  padding:4px 8px;border-radius:999px;border:1px solid var(--line-2);color:var(--muted);
+}
+.install-badge.ok{color:var(--red-bright);border-color:rgba(217,74,61,.45);background:var(--red-soft)}
+.install-badge.miss{color:var(--muted);border-style:dashed}
+
+/* ---------- 13. tooling grid (03) ---------- */
+.tools-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-top:16px}
+.tool-card{background:rgba(25,18,23,.72);border:1px solid var(--line);border-radius:var(--r);padding:18px}
+.tc-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.tc-name{font-size:16px;margin:0}
+.tc-head .install-badge{margin-left:auto}
+.tc-desc{color:var(--ink-2);font-size:13px;margin:0 0 10px;line-height:1.6}
+.tc-hint-row{margin:0}
+.tc-hint{
+  font-family:var(--mono);font-size:11px;color:var(--muted);
+  background:#120c10;border:1px solid var(--line);border-radius:6px;padding:6px 9px;
+  display:inline-block;word-break:break-all;
+}
+
+/* ---------- 14. tech stack spec sheet (04) ---------- */
+.spec .sub{font-family:var(--display);font-size:17px;font-weight:600;margin:0 0 10px;color:var(--ink)}
+.defs{margin:6px 0 0}
+.defs > li{padding:13px 0;border-bottom:1px solid var(--line);color:var(--ink-2);font-size:14px;line-height:1.65}
+.defs > li:first-child{border-top:1px solid var(--line)}
+.defs .term{font-family:var(--display);font-weight:600;color:var(--ink);margin-right:.35em}
+.defs .term::after{content:" —";color:var(--red);font-weight:400}
+.tbl-wrap{overflow-x:auto;margin:18px 0 6px;border:1px solid var(--line);border-radius:var(--r);background:rgba(25,18,23,.5)}
+.spec th,.spec td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);font-size:13.2px;vertical-align:top;color:var(--ink-2)}
+.spec th{font:600 10px/1.4 var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--red-bright);background:rgba(124,39,54,.16)}
+.spec tr:last-child td{border-bottom:0}
+.spec tbody tr:hover td{background:rgba(217,74,61,.045)}
+.spec td.m{font-family:var(--mono);font-size:12.2px}
+.callout{
+  border-left:2px solid var(--red);
+  background:linear-gradient(90deg,rgba(217,74,61,.07),transparent 70%);
+  padding:16px 20px;margin:22px 0;border-radius:0 var(--r) var(--r) 0;
+}
+.callout h4{font:400 10px/1 var(--mono);letter-spacing:.22em;text-transform:uppercase;color:var(--red-bright);margin:0 0 9px}
+.callout p{color:var(--ink-2);font-size:13.5px;margin:0}
+
+/* ---------- 15. archive (05) ---------- */
+.recent-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+.recent-list{display:grid;gap:8px;margin-top:8px}
+.recent-row{
+  display:grid;grid-template-columns:1fr auto auto;gap:4px 14px;align-items:center;
+  width:100%;text-align:left;cursor:pointer;
+  padding:12px 14px;border-radius:8px;
+  border:1px solid var(--line);background:rgba(25,18,23,.6);color:var(--ink-2);
+  font-family:inherit;transition:border-color .18s var(--ease),background .18s var(--ease),padding-left .18s var(--ease);
+}
+.recent-row:hover{border-color:var(--red);background:rgba(217,74,61,.05);padding-left:20px}
+.rr-value{font-family:var(--mono);font-size:12.5px;color:var(--ink);word-break:break-all}
+.rr-status{display:flex;align-items:center;gap:8px}
+.rr-meta{display:flex;align-items:center;gap:10px;grid-column:1 / -1;flex-wrap:wrap}
+.rr-date{font:400 10.5px/1 var(--mono);letter-spacing:.06em;color:var(--muted)}
+.rr-id{font:400 10.5px/1 var(--mono);letter-spacing:.06em;color:var(--red);opacity:.8}
+
+/* ---------- 16. job view — dossier / exhibits ---------- */
+.job-top{
+  display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+  padding:18px 20px;margin-bottom:18px;
+  background:rgba(25,18,23,.72);border:1px solid var(--line);border-radius:var(--r);
+}
+.job-title{min-width:220px;flex:1 1 320px}
+.job-label{
+  display:block;font:400 9.5px/1 var(--mono);letter-spacing:.28em;text-transform:uppercase;
+  color:var(--red);margin-bottom:7px;
+}
+#jobValue{font-family:var(--mono);font-size:14px;color:var(--ink);word-break:break-all;line-height:1.6}
+.job-meta{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.job-elapsed{font:400 11px/1 var(--mono);letter-spacing:.08em;color:var(--muted)}
+.job-id{font:400 10.5px/1 var(--mono);letter-spacing:.06em;color:var(--muted);opacity:.85}
+.job-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.toggle{
+  display:inline-flex;align-items:center;gap:8px;cursor:pointer;
+  font:400 10.5px/1.3 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+}
+.toggle input{accent-color:var(--red)}
+.toggle:hover{color:var(--ink-2)}
+
+/* exhibits grid — one column per query type */
+.exhibits{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;align-items:start;margin-bottom:18px}
+.exhibit-col{padding:0;overflow:hidden}
+.exhibit-head{
+  display:flex;align-items:center;gap:12px;
+  padding:14px 18px;border-bottom:1px solid var(--line);
+  background:linear-gradient(90deg,rgba(124,39,54,.18),transparent 70%);
+}
+.exhibit-tag{
+  font:600 9.5px/1 var(--mono);letter-spacing:.24em;text-transform:uppercase;
+  color:var(--red-bright);border:1px solid rgba(217,74,61,.5);
+  padding:5px 9px;border-radius:4px;background:rgba(217,74,61,.08);flex:none;
+}
+.exhibit-kind{font:400 11px/1 var(--mono);letter-spacing:.26em;text-transform:uppercase;color:var(--ink);margin:0}
+.exhibit-value{
+  font-family:var(--mono);font-size:12.5px;color:var(--ink-2);
+  padding:12px 18px;margin:0;border-bottom:1px solid var(--line);
+  word-break:break-all;background:rgba(15,11,13,.35);
+}
+.exhibit-body{padding:14px 18px 18px;display:grid;gap:12px}
+
+/* tool result cards inside exhibits */
+.tool-result{border:1px solid var(--line);border-radius:8px;background:rgba(21,14,18,.66);overflow:hidden}
+.tr-head{
+  display:flex;align-items:center;gap:10px;width:100%;text-align:left;cursor:pointer;
+  padding:11px 13px;border:0;background:none;color:var(--ink);font-family:inherit;
+  transition:background .18s var(--ease);
+}
+.tr-head:hover{background:rgba(217,74,61,.05)}
+.tr-head .chev{
+  width:14px;height:14px;flex:none;color:var(--muted);
+  transition:transform .2s var(--ease);
+}
+.tool-result.open .chev{transform:rotate(180deg);color:var(--red-bright)}
+.tr-name{font:600 13px/1 var(--mono);letter-spacing:.02em;color:var(--ink)}
+.tr-qtype{
+  font:400 9px/1 var(--mono);letter-spacing:.18em;text-transform:uppercase;
+  color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:3px 6px;
+}
+.tr-meta{margin-left:auto;display:flex;align-items:center;gap:10px;flex:none}
+.tr-count{font:400 10.5px/1 var(--mono);letter-spacing:.08em;color:var(--muted)}
+.tr-body{padding:4px 13px 13px;display:grid;gap:12px;border-top:1px solid var(--line)}
+.tr-error{
+  font-family:var(--mono);font-size:12px;color:var(--laser);
+  background:rgba(255,59,47,.06);border:1px solid rgba(255,59,47,.3);border-radius:6px;
+  padding:8px 10px;word-break:break-word;
+}
+.tr-empty,.tr-note{font-size:12.5px;color:var(--muted);margin:0}
+.tr-note{font-family:var(--mono);font-size:11px;letter-spacing:.04em}
+
+/* evidence tags — found accounts */
+.ev-list{display:grid;gap:8px;max-height:430px;overflow:auto;scrollbar-width:thin}
+.ev{
+  display:flex;align-items:center;gap:10px;min-width:0;
+  border:1px solid var(--line-2);border-radius:6px;
+  background:var(--surface-2);padding:8px 11px 8px 10px;
+}
+.ev::before{
+  content:"";width:6px;height:6px;border-radius:50%;flex:none;
+  border:1.5px solid var(--red);background:rgba(15,11,13,.5);
+  box-shadow:0 0 5px rgba(217,74,61,.35);
+}
+.ev-site{font:600 12px/1.3 var(--mono);color:var(--red-bright);flex:none;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ev-url{
+  font:400 11px/1.3 var(--mono);color:var(--ink-2);text-decoration:none;
+  flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.ev-url:hover{color:var(--red-bright);text-decoration:underline;text-underline-offset:3px}
+.ev-nourl{font:400 11px/1.3 var(--mono);color:var(--muted);flex:1}
+.ev-http{
+  font:600 9.5px/1 var(--mono);flex:none;
+  border:1px solid var(--line-2);border-radius:4px;padding:3px 6px;color:var(--muted);
+}
+.ev-http.ok{color:var(--ink);border-color:var(--maroon)}
+.ev-http.bad{color:var(--laser);border-color:rgba(255,59,47,.4)}
+.ev-http.mid{color:var(--red-bright)}
+
+/* dossier fact table (phoneinfoga info, non-pivot rows) */
+.facts{border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.facts-cap{
+  font:400 9.5px/1 var(--mono);letter-spacing:.22em;text-transform:uppercase;
+  color:var(--red);padding:8px 11px;background:rgba(124,39,54,.14);border-bottom:1px solid var(--line);
+}
+.fact{display:grid;grid-template-columns:minmax(110px,170px) 1fr;border-bottom:1px solid var(--line)}
+.fact:last-child{border-bottom:0}
+.fact .k{
+  font:400 10px/1.5 var(--mono);letter-spacing:.08em;text-transform:uppercase;
+  color:var(--muted);padding:7px 11px;background:rgba(32,22,28,.5);
+  word-break:break-word;
+}
+.fact .v{font:400 12px/1.55 var(--mono);color:var(--ink-2);padding:7px 11px;word-break:break-word}
+
+/* search pivots — collapsible block of links */
+.pivots{border:1px dashed var(--line-2);border-radius:8px}
+.pivots summary{
+  cursor:pointer;list-style:none;
+  font:600 9.5px/1 var(--mono);letter-spacing:.22em;text-transform:uppercase;
+  color:var(--red-bright);padding:10px 12px;
+}
+.pivots summary::-webkit-details-marker{display:none}
+.pivots summary::before{content:"▸ ";color:var(--red)}
+.pivots[open] summary::before{content:"▾ "}
+.pivots summary:hover{background:rgba(217,74,61,.05);border-radius:8px}
+.pivot-list{padding:2px 12px 11px;display:grid;gap:7px}
+.pivot-list a{
+  font:400 11.5px/1.5 var(--mono);color:var(--ink-2);text-decoration:none;
+  word-break:break-all;display:inline-block;
+}
+.pivot-list a::before{content:"→ ";color:var(--red)}
+.pivot-list a:hover{color:var(--red-bright);text-decoration:underline;text-underline-offset:3px}
+
+/* ---------- 17. console ---------- */
+.console-wrap{padding:0;overflow:hidden}
+.console-head{
+  display:flex;align-items:center;gap:12px;
+  padding:12px 16px;border-bottom:1px solid var(--line);
+  background:rgba(124,39,54,.1);
+}
+.console-head h3{font-size:13px;margin:0;letter-spacing:.02em}
+.console-state{font:600 9.5px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
+.console-state.live{color:var(--red-bright)}
+.console-state.live::before{content:"● ";animation:pulse 1.4s ease-in-out infinite}
+.console-state.paused{color:var(--muted)}
+.console{
+  height:280px;overflow:auto;scrollbar-width:thin;
+  background:#0a0608;padding:10px 14px;
+  font:400 11.5px/1.75 var(--mono);color:var(--ink-2);
+}
+.log-line{white-space:pre-wrap;word-break:break-all;display:flex;gap:10px;align-items:baseline}
+.log-tool{color:var(--red-bright);flex:none;letter-spacing:.02em}
+.log-text{color:var(--ink-2);min-width:0}
+
+/* ---------- 18. footer ---------- */
+.foot{
+  position:relative;z-index:2;border-top:1px solid var(--line);
+  background:var(--bg-2);padding:26px 26px 34px;margin-top:20px;
+}
+.foot-in{max-width:var(--wrap);margin:0 auto;display:grid;gap:6px}
+.foot .fp{color:var(--ink-2);font-size:13px;margin:0}
+.foot .fp a{color:var(--red-bright);text-decoration:none}
+.foot .fp a:hover{text-decoration:underline;text-underline-offset:3px}
+.foot .fine{color:var(--muted);font-size:11.5px;font-family:var(--mono);letter-spacing:.04em;margin:0}
+.foot .fp b{color:var(--ink);font-weight:600}
+
+/* ---------- 19. settings modal ---------- */
+dialog{
+  background:var(--surface);color:var(--ink);
+  border:1px solid var(--line-2);border-radius:12px;
+  padding:24px;width:min(540px,92vw);
+  box-shadow:0 30px 80px rgba(0,0,0,.5);
+}
+dialog::backdrop{background:rgba(10,6,8,.62);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+.modal-head{margin-bottom:16px}
+.modal-head h2{font-size:18px}
+.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+
+/* ---------- 20. toasts ---------- */
+#toasts{
+  position:fixed;right:18px;bottom:18px;z-index:300;
+  display:grid;gap:10px;max-width:min(420px,calc(100vw - 36px));
+}
+.toast{
+  display:flex;align-items:flex-start;gap:12px;
+  background:rgba(25,18,23,.96);border:1px solid var(--line-2);
+  border-left:2px solid var(--line-2);border-radius:8px;
+  padding:12px 14px;box-shadow:0 14px 40px rgba(0,0,0,.45);
+  animation:toastIn .22s var(--ease);
+}
+@keyframes toastIn{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:none}}
+.toast.out{opacity:0;transform:translateX(10px);transition:opacity .2s,transform .2s}
+.toast-msg{font-size:13px;color:var(--ink-2);line-height:1.55}
+.toast-error{border-left-color:var(--laser)}
+.toast-error .toast-msg{color:var(--red-bright)}
+.toast-warn{border-left-color:var(--maroon)}
+.toast-success{border-left-color:var(--red)}
+.toast-x{
+  appearance:none;background:none;border:0;cursor:pointer;flex:none;
+  color:var(--muted);font-size:15px;line-height:1;padding:2px 4px;
+}
+.toast-x:hover{color:var(--ink)}
+
+/* ---------- 21. responsive ---------- */
+@media (max-width:880px){
+  .stamp{position:static;display:inline-block;transform:rotate(-4deg);margin-bottom:16px}
+  .bp-note{display:none}
+  .exhibits{grid-template-columns:1fr}
+  .job-top{align-items:stretch;flex-direction:column}
+}
+@media (max-width:640px){
+  .wrap{padding:0 16px 48px}
+  .cia-nav{padding:0 14px}
+  .wordmark .sub{display:none}
+  .card{padding:16px}
+  .hero{padding-top:30px}
+  .fact{grid-template-columns:1fr}
+  .fact .k{border-bottom:0;padding-bottom:0}
+  .tr-head{flex-wrap:wrap}
+  .tr-meta{margin-left:0;width:100%}
+}
+
+/* ---------- 22. reduced motion ---------- */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.001ms!important;animation-iteration-count:1!important;
+    transition-duration:.001ms!important;scroll-behavior:auto!important;
+  }
+  .laser,.xh,.bp-spot{display:none}
+  .bp-grid{animation:none}
+  .pill-checking .pdot{animation:none}
+  .badge-running .dot{animation:none}
+  .console-state.live::before{animation:none}
+}
+</style>
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<!-- ================= blueprint background layers ================= -->
+<div class="bp-grid" aria-hidden="true"></div>
+<div class="bp-vignette" aria-hidden="true"></div>
+<div class="bp-datum" aria-hidden="true">
+  <i style="left:9%;top:18%"></i><i style="left:23%;top:64%"></i>
+  <i style="left:41%;top:12%"></i><i style="left:57%;top:82%"></i>
+  <i style="left:72%;top:30%"></i><i style="left:88%;top:55%"></i>
+  <i style="left:14%;top:40%"></i><i style="left:66%;top:70%"></i>
+  <i style="left:34%;top:88%"></i><i style="left:80%;top:14%"></i>
+  <i style="left:4%;top:78%"></i><i style="left:48%;top:44%"></i>
+</div>
+<div class="bp-grain" aria-hidden="true"></div>
+<div class="bp-note" style="right:3vw;top:calc(var(--banner-h) + var(--nav-h) + 150px)" aria-hidden="true">QI-7 · SIGNAL MONITOR</div>
+<div class="bp-note v" style="left:1.6vw;top:34vh" aria-hidden="true">REV 3.1 · CASE INTAKE BLUEPRINT</div>
+<div class="laser" aria-hidden="true"></div>
+<div class="xh" aria-hidden="true"><span class="lx"></span><span class="ly"></span></div>
+<div class="bp-spot" aria-hidden="true"></div>
+
+<!-- ================= header: classification banner + nav ================= -->
+<header class="cia">
+  <div class="cia-banner" aria-hidden="true">
+    <span>Qalarc Intelligence</span><span class="sep">·</span>
+    <span>Open Access</span><span class="sep">//</span>
+    <span>Public OSINT</span>
+  </div>
+  <div class="cia-nav">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32" width="26" height="26" fill="none" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="qg" x1="4" y1="5" x2="27" y2="27" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#ff6a55"/>
+            <stop offset="1" stop-color="#d94a3d"/>
+          </linearGradient>
+        </defs>
+        <g stroke="url(#qg)" stroke-width="2" stroke-linecap="round">
+          <path d="M5 16.2C5 10.1 9.9 5.2 16 5.2s11 4.9 11 11c0 2.3-.3 4.5-.9 6.6"/>
+          <path d="M9.3 18.4A7.4 7.4 0 0 1 8.6 15c0-4.1 3.3-7.4 7.4-7.4s7.4 3.3 7.4 7.4c0 2.6-.3 5.1-.8 7.5" opacity=".85"/>
+          <path d="M13 19.9c-.4-1.6-.6-3.4-.6-5.2 0-2 1.6-3.6 3.6-3.6s3.6 1.6 3.6 3.6c0 3.9-.4 7.7-1.2 11.3" opacity=".7"/>
+          <path d="M16 14.2v7.5" opacity=".9"/>
+        </g>
+      </svg>
+      <span class="wordmark">qalarc <span class="sep">·</span> <span class="sub">OSINT Hub</span></span>
+    </div>
+    <div class="top-actions">
+      <button id="apiPill" class="pill pill-checking" type="button" title="API status — click to open Settings">
+        <span class="pdot" aria-hidden="true"></span><span id="apiPillText">checking…</span>
+      </button>
+      <button id="settingsBtn" class="icon-btn" type="button" aria-label="Settings" aria-haspopup="dialog">
+        <svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" focusable="false">
+          <circle cx="8" cy="8" r="2.2"/>
+          <path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M12.4 3.6l-1.2 1.2M4.8 11.2l-1.2 1.2"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ================= offline banner ================= -->
+<div class="banner" id="offlineBanner" role="status" hidden>
+  <span><b>Scanner backend unreachable.</b> Start the qalarc_osint API on your host, or point Settings at a running instance.</span>
+  <span>Retrying every 30 s — set <code>osint_api_base</code> via Settings <span class="mono">⚙</span></span>
+</div>
+
+<main id="main">
+  <div class="wrap">
+
+    <!-- ================= hero ================= -->
+    <section class="hero" aria-labelledby="heroTitle">
+      <p class="hero-kicker">Case File <b id="caseNo">№0000</b> <span aria-hidden="true">·</span> Open-Source Intelligence Workbench</p>
+      <!-- stamp removed at owner request: open access -->
+      <h1 id="heroTitle"><span class="grad">OSINT Hub</span> — case intake</h1>
+      <p class="lede">Correlate usernames, phone numbers and email addresses across public platforms in a single case. Dating-platform footprints, dossier facts and search pivots — for authorized investigations only.</p>
+    </section>
+
+    <div class="dim" aria-hidden="true">
+      <span class="tick l"></span><span class="tick r"></span>
+      <span class="arw l"></span><span class="arw r"></span>
+      <span class="val">Dossier Access Grid · 5 Sheets</span>
+    </div>
+
+    <!-- ================= scanner (tabs) ================= -->
+    <div id="scannerArea">
+
+      <nav id="tabsNav" class="tabs" role="tablist" aria-label="Dossier sheets">
+        <button class="tab" role="tab" id="tab-case" aria-controls="panel-case" aria-selected="true" tabindex="0" type="button"><span class="tab-n">01</span>Case File</button>
+        <button class="tab" role="tab" id="tab-dating" aria-controls="panel-dating" aria-selected="false" tabindex="-1" type="button"><span class="tab-n">02</span>Dating Platforms</button>
+        <button class="tab" role="tab" id="tab-tools" aria-controls="panel-tools" aria-selected="false" tabindex="-1" type="button"><span class="tab-n">03</span>Tooling</button>
+        <button class="tab" role="tab" id="tab-stack" aria-controls="panel-stack" aria-selected="false" tabindex="-1" type="button"><span class="tab-n">04</span>Tech Stack</button>
+        <button class="tab" role="tab" id="tab-recent" aria-controls="panel-recent" aria-selected="false" tabindex="-1" type="button"><span class="tab-n">05</span>Archive</button>
+      </nav>
+
+      <!-- 01 — CASE FILE -->
+      <section class="panel" id="panel-case" role="tabpanel" aria-labelledby="tab-case" tabindex="0">
+        <div class="card scan-card">
+          <h2>Open a case</h2>
+          <p class="hint">Enter any combination of subjects — one field is enough. Each subject becomes its own exhibit in the case file; tools run only for the fields you fill. Leading <span class="mono">@</span> is stripped automatically.</p>
+
+          <div class="resume-row" id="resumeRow" hidden>
+            <button id="resumeBtn" class="btn btn-ghost btn-xs" type="button">↻ Resume last job</button>
+            <span class="muted small mono">last:</span>
+            <span id="resumeJobId" class="mono muted small"></span>
+          </div>
+
+          <div class="field">
+            <label for="caseUsername">Username</label>
+            <input id="caseUsername" type="text" placeholder="@username or plain" autocomplete="off" autocapitalize="off" spellcheck="false">
+          </div>
+
+          <div class="field">
+            <label for="casePhone">Phone number</label>
+            <input id="casePhone" type="tel" placeholder="+61 4xx xxx xxx" autocomplete="off" spellcheck="false">
+          </div>
+
+          <div class="field">
+            <label for="caseEmail">Email address</label>
+            <input id="caseEmail" type="email" placeholder="subject@example.com" autocomplete="off" autocapitalize="off" spellcheck="false">
+          </div>
+
+          <div class="field">
+            <span class="chips-label" id="caseUserToolsLabel">Usernames</span>
+            <div class="chips" id="chipsUsername" role="group" aria-labelledby="caseUserToolsLabel"></div>
+            <span class="chips-label" id="casePhoneToolsLabel" style="margin-top:14px">Phone</span>
+            <div class="chips" id="chipsPhone" role="group" aria-labelledby="casePhoneToolsLabel"></div>
+            <span class="chips-label" id="caseEmailToolsLabel" style="margin-top:14px">Email</span>
+            <div class="chips" id="chipsEmail" role="group" aria-labelledby="caseEmailToolsLabel"></div>
+          </div>
+
+          <div class="field-row">
+            <div class="field field-sm" style="margin-bottom:0">
+              <label for="caseTimeout">Timeout (seconds)</label>
+              <select id="caseTimeout">
+                <option value="5">5 s</option>
+                <option value="10" selected>10 s</option>
+                <option value="20">20 s</option>
+              </select>
+            </div>
+            <button id="caseScan" class="btn btn-primary" type="button" style="margin-bottom:0">
+              <span class="spinner" aria-hidden="true"></span><span class="btn-label">Open case</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 02 — DATING PLATFORMS -->
+      <section class="panel" id="panel-dating" role="tabpanel" aria-labelledby="tab-dating" tabindex="0" hidden>
+        <div class="card scan-card">
+          <h2>Dating platform sweep</h2>
+          <p class="hint">Scans dating platforms (Tinder, Badoo, MeetMe, AFF…) via maigret's site database, then filters results down to known dating domains.</p>
+
+          <div class="field">
+            <label for="datingInput">Username</label>
+            <input id="datingInput" type="text" placeholder="@username or plain" autocomplete="off" autocapitalize="off" spellcheck="false">
+          </div>
+
+          <div class="field">
+            <span class="chips-label">Tool</span>
+            <div class="chips" id="datingChips" role="group" aria-label="Dating scan tool"></div>
+            <p class="micro">maigret checks its full site database; the toggle below filters results down to known dating platforms. The same filter follows you into the job view.</p>
+          </div>
+
+          <div class="field">
+            <label class="toggle" style="text-transform:none;letter-spacing:.04em"><input type="checkbox" id="datingOnly"> show only dating sites</label>
+          </div>
+
+          <div class="field-row">
+            <div class="field field-sm" style="margin-bottom:0">
+              <label for="datingTimeout">Timeout (seconds)</label>
+              <select id="datingTimeout">
+                <option value="5">5 s</option>
+                <option value="10" selected>10 s</option>
+                <option value="20">20 s</option>
+              </select>
+            </div>
+            <button id="datingScan" class="btn btn-primary" type="button" style="margin-bottom:0">
+              <span class="spinner" aria-hidden="true"></span><span class="btn-label">Sweep platforms</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="callout" style="max-width:720px;margin-top:18px">
+          <h4>Responsible use</h4>
+          <p>Dating-platform checks are for verifying consent and identity, exposure assessment on persons you are authorized to investigate, and due-diligence work. Respect platform terms of service and local privacy law (GDPR/CCPA). Never for stalking, harassment or deception.</p>
+        </div>
+      </section>
+
+      <!-- 03 — TOOLING -->
+      <section class="panel" id="panel-tools" role="tabpanel" aria-labelledby="tab-tools" tabindex="0" hidden>
+        <div class="card">
+          <h2>Tooling</h2>
+          <p class="hint">Scanners execute server-side on the API host. Install anything missing on the host, then restart the API — status refreshes on every health check.</p>
+          <div class="tools-grid" id="toolsGrid"></div>
+        </div>
+      </section>
+
+      <!-- 04 — TECH STACK -->
+      <section class="panel spec" id="panel-stack" role="tabpanel" aria-labelledby="tab-stack" tabindex="0" hidden>
+        <div class="card">
+          <h2>Tech stack — blueprint spec sheet</h2>
+          <p class="hint">How this instrument is built. Everything below is rendered in-page from this single HTML file; nothing is fetched externally.</p>
+
+          <div class="dim" aria-hidden="true"><span class="tick l"></span><span class="tick r"></span><span class="arw l"></span><span class="arw r"></span><span class="val">Sheet 01 · Backend</span></div>
+          <ul class="defs">
+            <li><span class="term">Framework</span>FastAPI (Python 3), served by <span class="mono">uvicorn</span> — async HTTP with a thread-pool job runner so scans never block the API.</li>
+            <li><span class="term">Execution</span>Each tool runs as its own subprocess with hard timeouts, so a hung CLI can never wedge a worker.</li>
+            <li><span class="term">Streaming</span>Server-Sent Events at <span class="mono">/api/jobs/&#123;id&#125;/stream</span> — snapshot, log, found, info, tool_done and job_done events pushed live while tools run.</li>
+            <li><span class="term">Rate limiting</span>Sliding window — 20 jobs/hour/IP by default, returning HTTP 429 when exceeded.</li>
+            <li><span class="term">Auth</span>Optional bearer token (<span class="mono">Authorization: Bearer …</span>); when enabled, clients poll instead of streaming since EventSource cannot send headers.</li>
+            <li><span class="term">Persistence</span>Job records and logs are written under <span class="mono">data/jobs/</span> so archives survive restarts.</li>
+          </ul>
+
+          <div class="dim" aria-hidden="true"><span class="tick l"></span><span class="tick r"></span><span class="arw l"></span><span class="arw r"></span><span class="val">Sheet 02 · Scanners</span></div>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr><th>Tool</th><th>Kind</th><th>Purpose</th><th>Upstream</th></tr></thead>
+              <tbody>
+                <tr><td><b>Sherlock</b></td><td class="m">username</td><td>Hunts a username across 400+ social sites.</td><td class="m">sherlock-project/sherlock</td></tr>
+                <tr><td><b>Maigret</b></td><td class="m">username</td><td>Checks 3000+ sites including dating platforms. Powers the Dating sheet.</td><td class="m">soxoj/maigret</td></tr>
+                <tr><td><b>PhoneInfoga</b></td><td class="m">phone</td><td>Number intelligence — formats, country, carrier, reputation plus Google-dork search pivots.</td><td class="m">sundowndev/phoneinfoga</td></tr>
+                <tr><td><b>Ignorant</b></td><td class="m">phone</td><td>Checks whether a phone number is registered on platforms (Snapchat, Instagram…).</td><td class="m">megadose/ignorant</td></tr>
+                <tr><td><b>SearchPhone</b></td><td class="m">phone</td><td>Multi-API phone OSINT (Google/GitHub/Reddit/DDG + Hudson Rock) with report generation.</td><td class="m">HackUnderway/SearchPhone</td></tr>
+                <tr><td><b>Holehe</b></td><td class="m">email</td><td>Checks if an email is registered on 120+ platforms via password-reset flows.</td><td class="m">megadose/holehe</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="dim" aria-hidden="true"><span class="tick l"></span><span class="tick r"></span><span class="arw l"></span><span class="arw r"></span><span class="val">Sheet 03 · Frontend</span></div>
+          <ul class="defs">
+            <li><span class="term">Single file</span>One self-contained HTML document — inline CSS + vanilla JS, zero dependencies, zero build step, zero external requests (fonts are system stacks).</li>
+            <li><span class="term">Live updates</span>SSE streaming with automatic 1.5 s polling fallback (used when a bearer token is set or the stream drops).</li>
+            <li><span class="term">Runtime config</span>API base URL and optional bearer token are set in Settings and stored in <span class="mono">localStorage</span> — the same file works against any backend instance.</li>
+          </ul>
+
+          <div class="dim" aria-hidden="true"><span class="tick l"></span><span class="tick r"></span><span class="arw l"></span><span class="arw r"></span><span class="val">Sheet 04 · Deployment Model</span></div>
+          <ul class="defs">
+            <li><span class="term">Frontend</span>Any static host — e.g. Cloudflare Pages. It is one file with no server-side requirements.</li>
+            <li><span class="term">Backend</span>Any host with the scanner CLIs installed (see Tooling sheet for install hints). API base is configurable at runtime, so frontend and backend can live on different origins.</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 05 — ARCHIVE -->
+      <section class="panel" id="panel-recent" role="tabpanel" aria-labelledby="tab-recent" tabindex="0" hidden>
+        <div class="card">
+          <div class="recent-head">
+            <div>
+              <h2>Archive</h2>
+              <p class="hint" style="margin-bottom:0">The last 15 jobs known to the API. Click a row to reopen its exhibits and logs.</p>
+            </div>
+            <button id="recentRefresh" class="btn btn-ghost btn-xs" type="button">Refresh</button>
+          </div>
+          <div class="recent-list" id="recentList"></div>
+        </div>
+      </section>
+
+    </div><!-- /scannerArea -->
+
+    <!-- ================= job view — the case dossier ================= -->
+    <section id="jobView" aria-label="Case job" hidden>
+      <div class="job-top">
+        <button id="jobBack" class="btn btn-ghost btn-xs" type="button">← New case</button>
+        <div class="job-title">
+          <span class="job-label">Subject</span>
+          <span id="jobValue">…</span>
+        </div>
+        <div class="job-meta">
+          <span id="jobStatus"></span>
+          <span id="jobElapsed" class="job-elapsed" aria-label="Elapsed time"></span>
+          <span id="jobId" class="job-id"></span>
+        </div>
+        <div class="job-actions">
+          <label id="datingFilterWrap" class="toggle" hidden>
+            <input type="checkbox" id="datingFilter"> dating sites only
+          </label>
+          <button id="exportJson" class="btn btn-ghost btn-xs" type="button" disabled>JSON</button>
+          <button id="exportMd" class="btn btn-ghost btn-xs" type="button" disabled>Case report · MD</button>
+        </div>
+      </div>
+
+      <div id="jobTools"></div>
+
+      <div class="console-wrap card">
+        <div class="console-head">
+          <h3>Surveillance log</h3>
+          <span id="consoleState" class="console-state"></span>
+          <button id="jumpLatest" class="btn btn-ghost btn-xs" type="button" hidden>↓ jump to latest</button>
+        </div>
+        <div id="console" class="console" role="log" aria-live="off" aria-label="Live scan log" tabindex="0" title="Live log — newest at the bottom (max 2000 lines kept)"></div>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer class="foot">
+  <div class="foot-in">
+    <p class="fp">For authorized security research, exposure assessment &amp; identity verification only · <a href="https://qalarc.com" target="_blank" rel="noopener noreferrer">qalarc.com</a></p>
+    <p class="fine">Respect platform ToS and local privacy law (GDPR/CCPA). Not for stalking or harassment. — QI-7 · REV 3.1</p>
+  </div>
+</footer>
+
+<!-- ================= settings modal ================= -->
+<dialog id="settingsModal" aria-labelledby="settingsTitle">
+  <div class="modal-head">
+    <h2 id="settingsTitle">Settings</h2>
+  </div>
+  <div class="field">
+    <label for="settingsBase">API base URL</label>
+    <input id="settingsBase" type="text" placeholder="same origin, e.g. https://osint.qalarc.com" autocomplete="off" spellcheck="false">
+    <p class="micro">Leave empty to use the same origin this page is served from. Stored locally as <code class="mono">osint_api_base</code>.</p>
+  </div>
+  <div class="field">
+    <label for="settingsToken">Bearer token</label>
+    <input id="settingsToken" type="password" placeholder="optional" autocomplete="off">
+    <p class="micro">Sent as <code class="mono">Authorization: Bearer …</code> on every request. When set, live event streaming is unavailable (EventSource cannot send headers) and the log falls back to 1.5 s polling.</p>
+  </div>
+  <div class="modal-actions">
+    <button id="settingsClose" class="btn btn-ghost" type="button">Close</button>
+    <button id="settingsSave" class="btn btn-primary" type="button">Save</button>
+  </div>
+</dialog>
+
+<div id="toasts"></div>
+
+<script>
+(() => {
+'use strict';
+
+/* ============================================================
+   constants
+============================================================ */
+const LS_BASE   = 'osint_api_base';
+const LS_TOKEN  = 'osint_token';
+const LS_LAST   = 'osint_last_job';
+const LS_DATING = 'osint_dating_only';
+const SS_CASE   = 'osint_case_no';
+
+const TABS = ['case', 'dating', 'tools', 'stack', 'recent'];
+const QTYPES = ['username', 'phone', 'email'];
+
+/* Dating-platform hostname filter (Dating sheet "show only dating sites").
+   Hostname match includes subdomains, "www." stripped. */
+const DATING_SITES = [
+  'tinder.com', 'badoo.com', 'meetme.com', 'adultfriendfinder.com',
+  'okcupid.com', 'pof.com', 'match.com', 'hinge.co', 'bumble.com',
+  'grindr.com', 'feeld.co', 'zoosk.com', 'ashleymadison.com', 'eharmony.com'
+];
+
+const MAX_LOG_LINES    = 2000;
+const POLL_MS          = 1500;
+const FETCH_TIMEOUT_MS = 15000;
+const SVGNS            = 'http://www.w3.org/2000/svg';
+
+/* ============================================================
+   tiny dom helpers
+============================================================ */
+const $ = (sel, root) => (root || document).querySelector(sel);
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+
+function chevronEl() {
+  const s = document.createElementNS(SVGNS, 'svg');
+  s.setAttribute('viewBox', '0 0 16 16');
+  s.setAttribute('aria-hidden', 'true');
+  s.classList.add('chev');
+  const p = document.createElementNS(SVGNS, 'path');
+  p.setAttribute('d', 'M4 6l4 4 4-4');
+  p.setAttribute('fill', 'none');
+  p.setAttribute('stroke', 'currentColor');
+  p.setAttribute('stroke-width', '1.8');
+  p.setAttribute('stroke-linecap', 'round');
+  p.setAttribute('stroke-linejoin', 'round');
+  s.appendChild(p);
+  return s;
+}
+
+/* ============================================================
+   storage (privacy-mode safe)
+============================================================ */
+function lsGet(k) { try { return localStorage.getItem(k); } catch (_) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (_) {} }
+function lsDel(k) { try { localStorage.removeItem(k); } catch (_) {} }
+function ssGet(k) { try { return sessionStorage.getItem(k); } catch (_) { return null; } }
+function ssSet(k, v) { try { sessionStorage.setItem(k, v); } catch (_) {} }
+
+function getBase()  { return (lsGet(LS_BASE) || '').trim().replace(/\/+$/, ''); }
+function getToken() { return (lsGet(LS_TOKEN) || '').trim(); }
+
+/* Case file number — random 4 digits, persisted per browser session. */
+function caseNo() {
+  let n = ssGet(SS_CASE);
+  if (!/^\d{4}$/.test(n || '')) {
+    n = String(Math.floor(1000 + Math.random() * 9000));
+    ssSet(SS_CASE, n);
+  }
+  return n;
+}
+
+/* ============================================================
+   state
+============================================================ */
+const state = {
+  online: null,            /* null = checking, true/false = result */
+  health: null,
+  tools: [],
+  running: false,
+  tab: 'case',
+  selected: { username: new Set(), phone: new Set(), email: new Set() },
+  datingOnly: false,
+  job: null,               /* accumulated job object (API + live events) */
+  jobId: null,
+  jobOrigin: '',           /* 'case' | 'dating' | 'recent' | 'resume' */
+  jobWanted: null,         /* [{tool, qtype}] requested when the scan started */
+  jobLoadedAt: 0,
+  frozenAt: null,          /* clock freeze point once terminal */
+  concluded: false,
+  logLines: [],            /* {tool, qtype, text} — merge source for log_tail polling */
+  consolePaused: false,
+  expanded: {},            /* per-tool-card expansion persistence (tool|qtype) */
+  pollTimer: null,
+  es: null
+};
+
+const consoleEl = $('#console');
+
+/* ============================================================
+   utils
+============================================================ */
+function safeParse(s) { try { return JSON.parse(s); } catch (_) { return null; } }
+function isTerminal(s) { return s === 'done' || s === 'error'; }
+
+/* created_at / finished_at may be epoch seconds, epoch ms or ISO — normalise */
+function toMs(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return v < 1e12 ? v * 1000 : v;
+  if (typeof v === 'string') {
+    const t = Date.parse(v);
+    if (!Number.isNaN(t)) return t;
+    const n = Number(v);
+    if (Number.isFinite(n)) return n < 1e12 ? n * 1000 : n;
+  }
+  return null;
+}
+
+function fmtDur(totalSec) {
+  const s = Math.max(0, Math.floor(totalSec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  return (h > 0 ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
+}
+
+function download(filename, text, mime) {
+  const blob = new Blob([text], { type: mime + ';charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function isDatingUrl(u) {
+  try {
+    const h = new URL(String(u)).hostname.toLowerCase().replace(/^www\./, '');
+    return DATING_SITES.some(d => h === d || h.endsWith('.' + d));
+  } catch (_) { return false; }
+}
+
+/* Query columns of a job: multi jobs carry value objects → one column per
+   qtype present; single-type jobs carry a string value → one column. */
+function fallbackQtype(job) {
+  if (job && (job.type === 'username' || job.type === 'phone' || job.type === 'email')) return job.type;
+  const cols = jobColumns(job);
+  return cols.length ? cols[0].qtype : 'username';
+}
+
+function jobColumns(job) {
+  if (!job) return [];
+  if (job.type === 'multi' && job.value && typeof job.value === 'object') {
+    const cols = [];
+    QTYPES.forEach(qt => {
+      const v = job.value[qt];
+      if (v != null && String(v).trim() !== '') cols.push({ qtype: qt, value: String(v) });
+    });
+    if (cols.length) return cols;
+  }
+  return [{ qtype: fallbackForSingle(job), value: job.value != null ? String(job.value) : '' }];
+}
+
+function fallbackForSingle(job) {
+  return (job.type === 'phone' || job.type === 'email') ? job.type : 'username';
+}
+
+function subjectLine(job) {
+  return jobColumns(job).map(c => c.qtype.toUpperCase() + ': ' + c.value).join('  ·  ');
+}
+
+/* ============================================================
+   api wrapper — 15 s timeout, optional bearer auth
+============================================================ */
+async function api(path, opts) {
+  opts = opts || {};
+  const base = getBase();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  const headers = Object.assign({}, opts.headers || {});
+  headers['Accept'] = 'application/json';
+  if (opts.body) headers['Content-Type'] = 'application/json';
+  const tok = getToken();
+  if (tok) headers['Authorization'] = 'Bearer ' + tok;
+  try {
+    const res = await fetch(base + path, Object.assign({}, opts, { headers: headers, signal: ctrl.signal }));
+    let data = null;
+    try { data = await res.json(); } catch (_) { /* non-JSON body */ }
+    return { ok: res.ok, status: res.status, data: data };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function errText(data, fallback) {
+  const d = data && (data.detail != null ? data.detail : data.error);
+  if (d == null) return fallback;
+  return typeof d === 'string' ? d : JSON.stringify(d);
+}
+
+/* ============================================================
+   toasts
+============================================================ */
+function toast(msg, kind, ms) {
+  const host = $('#toasts');
+  while (host.childElementCount >= 4) host.firstElementChild.remove();
+  const t = el('div', 'toast toast-' + (kind || 'info'));
+  t.setAttribute('role', 'status');
+  t.appendChild(el('span', 'toast-msg', msg));
+  const x = el('button', 'toast-x', '×');
+  x.type = 'button';
+  x.setAttribute('aria-label', 'Dismiss notification');
+  t.appendChild(x);
+  host.appendChild(t);
+  let dead = false;
+  const kill = () => {
+    if (dead) return;
+    dead = true;
+    t.classList.add('out');
+    setTimeout(() => t.remove(), 220);
+  };
+  x.addEventListener('click', kill);
+  setTimeout(kill, ms || 5000);
+}
+
+/* ============================================================
+   health & tools
+============================================================ */
+async function checkHealth() {
+  const prev = state.online;
+  state.online = null;
+  renderHealth();
+  try {
+    const r = await api('/api/health');
+    if (r.ok && r.data && r.data.ok === true) {
+      state.online = true;
+      state.health = r.data;
+    } else {
+      state.online = false;
+      state.health = null;
+    }
+  } catch (_) {
+    state.online = false;
+    state.health = null;
+  }
+  renderHealth();
+  if (prev === false && state.online === true) toast('API is online.', 'success');
+}
+
+function renderHealth() {
+  const pill = $('#apiPill');
+  const txt = $('#apiPillText');
+  pill.classList.remove('pill-online', 'pill-offline', 'pill-checking');
+  if (state.online === null) {
+    pill.classList.add('pill-checking');
+    txt.textContent = 'checking…';
+    pill.title = 'Checking API…';
+  } else if (state.online) {
+    pill.classList.add('pill-online');
+    txt.textContent = 'API online';
+    pill.title = 'API online' + (state.health && state.health.version ? ' — v' + state.health.version : '') + '. Click to open Settings.';
+  } else {
+    pill.classList.add('pill-offline');
+    txt.textContent = 'offline — setup';
+    pill.title = 'Backend not reachable. Click to open Settings.';
+  }
+  $('#offlineBanner').hidden = state.online !== false;
+  setScanning(state.running);       /* refresh scan-button disabled state */
+  renderResumeChip();
+}
+
+async function fetchTools() {
+  try {
+    const r = await api('/api/tools');
+    if (r.ok && r.data && Array.isArray(r.data.tools)) state.tools = r.data.tools;
+    else state.tools = [];
+  } catch (_) {
+    state.tools = [];
+  }
+  renderChips();
+  renderToolsGrid();
+}
+
+function setScanning(on) {
+  state.running = !!on;
+  ['caseScan', 'datingScan'].forEach(id => {
+    const b = $('#' + id);
+    if (!b) return;
+    b.disabled = state.running || !state.online;
+    b.classList.toggle('busy', state.running);
+    b.setAttribute('aria-busy', String(state.running));
+  });
+}
+
+/* ============================================================
+   tooling sheet (03) — tool cards grid
+============================================================ */
+function renderToolsGrid() {
+  const grid = $('#toolsGrid');
+  if (!grid) return;
+  grid.textContent = '';
+  if (!state.tools.length) {
+    grid.appendChild(el('p', 'muted small',
+      state.online === null ? 'Loading tools…' :
+      state.online ? 'No tools reported by the API.' :
+      'API offline — tool status unavailable.'));
+    return;
+  }
+  state.tools.forEach(t => {
+    const card = el('article', 'tool-card');
+    const head = el('div', 'tc-head');
+    head.appendChild(el('h3', 'tc-name', t.name || t.id || ''));
+    head.appendChild(el('span', 'kind-badge', t.kind || 'tool'));
+    head.appendChild(el('span', 'install-badge ' + (t.installed ? 'ok' : 'miss'), t.installed ? 'installed' : 'not installed'));
+    card.appendChild(head);
+    card.appendChild(el('p', 'tc-desc', t.description || ''));
+    if (!t.installed) {
+      const p = el('p', 'tc-hint-row');
+      p.appendChild(el('code', 'tc-hint', t.hint || 'see server setup docs'));
+      card.appendChild(p);
+    }
+    grid.appendChild(card);
+  });
+}
+
+/* ============================================================
+   tool chips (Case File sheet)
+============================================================ */
+function toolsForKind(kind) { return state.tools.filter(t => t.kind === kind); }
+
+function renderChips() {
+  renderChipGroup($('#chipsUsername'), toolsForKind('username'), 'username');
+  renderChipGroup($('#chipsPhone'), toolsForKind('phone'), 'phone');
+  renderChipGroup($('#chipsEmail'), toolsForKind('email'), 'email');
+  renderChipGroup($('#datingChips'), state.tools.filter(t => t.id === 'maigret'), 'dating');
+}
+
+function renderChipGroup(container, tools, group) {
+  if (!container) return;
+  const sel = group === 'dating' ? null : state.selected[group];
+  const locked = group === 'dating';
+  if (!container.dataset.init && tools.length) {
+    container.dataset.init = '1';
+    if (!locked) tools.forEach(t => { if (t.installed) sel.add(t.id); });
+  }
+  container.textContent = '';
+  if (!tools.length) {
+    container.appendChild(el('span', 'muted small',
+      state.online === null ? 'Loading tools…' :
+      state.online ? 'No tools available for this mode.' :
+      'API offline — tool list unavailable.'));
+    return;
+  }
+  tools.forEach(t => {
+    const b = el('button', 'chip');
+    b.type = 'button';
+    const pressed = locked ? true : sel.has(t.id);
+    b.setAttribute('aria-pressed', String(pressed));
+    const dot = el('span', 'dot ' + (t.installed ? 'ok' : 'miss'));
+    b.appendChild(dot);
+    b.appendChild(el('span', 'chip-name', t.name || t.id));
+    if (!t.installed) {
+      b.classList.add('chip-disabled');
+      b.setAttribute('aria-disabled', 'true');
+      b.title = 'Not installed — ' + (t.hint || 'see Tooling sheet');
+      b.addEventListener('click', e => {
+        e.preventDefault();
+        toast((t.name || t.id) + ' is not installed on the server. ' + (t.hint || ''), 'warn');
+      });
+    } else if (locked) {
+      b.classList.add('chip-locked');
+      b.title = 'Dating sweeps run maigret only';
+    } else {
+      b.addEventListener('click', () => {
+        if (sel.has(t.id)) sel.delete(t.id); else sel.add(t.id);
+        b.setAttribute('aria-pressed', String(sel.has(t.id)));
+      });
+    }
+    container.appendChild(b);
+  });
+}
+
+function getSelectedTools(group) {
+  if (group === 'dating') {
+    const t = state.tools.find(x => x.id === 'maigret');
+    return (t && t.installed) ? ['maigret'] : [];
+  }
+  return Array.from(state.selected[group]).filter(id => {
+    const t = state.tools.find(x => x.id === id);
+    return !!(t && t.installed);
+  });
+}
+
+/* ============================================================
+   tabs — dossier sheets
+============================================================ */
+function selectTab(name) {
+  state.tab = name;
+  TABS.forEach(t => {
+    const tab = $('#tab-' + t);
+    const panel = $('#panel-' + t);
+    const on = t === name;
+    tab.setAttribute('aria-selected', String(on));
+    tab.tabIndex = on ? 0 : -1;
+    panel.hidden = !on;
+  });
+  if (name === 'recent') refreshRecent();
+}
+
+function onTabsKeydown(e) {
+  const tabs = TABS.map(t => $('#tab-' + t));
+  const i = tabs.indexOf(document.activeElement);
+  if (i < 0) return;
+  let j = null;
+  if (e.key === 'ArrowRight') j = (i + 1) % tabs.length;
+  else if (e.key === 'ArrowLeft') j = (i - 1 + tabs.length) % tabs.length;
+  else if (e.key === 'Home') j = 0;
+  else if (e.key === 'End') j = tabs.length - 1;
+  if (j != null) {
+    e.preventDefault();
+    tabs[j].focus();
+    selectTab(TABS[j]);
+  }
+}
+
+/* ============================================================
+   archive sheet (05) — recent jobs
+============================================================ */
+async function refreshRecent() {
+  const list = $('#recentList');
+  if (!list) return;
+  list.textContent = '';
+  list.appendChild(el('p', 'muted small', 'Loading…'));
+  try {
+    const r = await api('/api/jobs?limit=15');
+    if (!r.ok || !r.data || !Array.isArray(r.data.jobs)) throw new Error('bad response');
+    list.textContent = '';
+    if (!r.data.jobs.length) {
+      list.appendChild(el('p', 'muted', 'The archive is empty — open your first case.'));
+      return;
+    }
+    r.data.jobs.forEach(j => list.appendChild(recentRow(j)));
+  } catch (_) {
+    list.textContent = '';
+    list.appendChild(el('p', 'muted', 'Could not load the archive — API offline or unreachable.'));
+  }
+}
+
+function recentRow(j) {
+  const b = el('button', 'recent-row');
+  b.type = 'button';
+  b.appendChild(el('span', 'rr-value', j.value != null ? String(j.value) : '(unknown)'));
+  b.appendChild(el('span', 'kind-badge', j.type || ''));
+  const st = el('span', 'rr-status');
+  st.appendChild(statusBadge(j.status));
+  b.appendChild(st);
+  const meta = el('span', 'rr-meta');
+  const t = toMs(j.created_at);
+  meta.appendChild(el('span', 'rr-date', t ? new Date(t).toLocaleString() : (j.created_at != null ? String(j.created_at) : '')));
+  meta.appendChild(el('span', 'rr-id', j.id || ''));
+  b.appendChild(meta);
+  b.setAttribute('aria-label', 'Open job ' + (j.id || '') + ' — target ' + (j.value != null ? String(j.value) : 'unknown') + ', status ' + (j.status || 'unknown'));
+  b.addEventListener('click', () => {
+    if (!j.id) return;
+    lsSet(LS_LAST, j.id);
+    renderResumeChip();
+    openJob(j.id, 'recent');
+  });
+  return b;
+}
+
+/* ============================================================
+   scan start
+============================================================ */
+async function postScan(body, origin, wanted) {
+  if (state.running) { toast('A scan is already running — wait for it to finish.', 'warn'); return; }
+  if (!state.online) { toast('Backend offline — start the API first (see banner).', 'error'); return; }
+  setScanning(true);
+  let res;
+  try {
+    res = await api('/api/scan', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+  } catch (_) {
+    setScanning(false);
+    toast('Network error — cannot reach the API.', 'error');
+    return;
+  }
+
+  if (res.status === 202 && res.data && res.data.job_id) {
+    lsSet(LS_LAST, res.data.job_id);
+    renderResumeChip();
+    openJob(res.data.job_id, origin, wanted);
+    return;
+  }
+
+  setScanning(false);
+  if (res.status === 400 || res.status === 401 || res.status === 429) {
+    let m = errText(res.data, 'HTTP ' + res.status);
+    if (res.status === 401) m = 'Unauthorized — set a token in Settings.';
+    if (res.status === 429) m = 'Rate limited — ' + errText(res.data, 'retry later');
+    toast(m, res.status === 429 ? 'warn' : 'error');
+  } else {
+    toast('Unexpected API response (HTTP ' + res.status + ').', 'error');
+  }
+}
+
+/* 01 — CASE FILE: any combination of username / phone / email (≥1). */
+function startCase() {
+  const un = $('#caseUsername').value.replace(/^@+/, '').trim();
+  const ph = $('#casePhone').value.trim();
+  const em = $('#caseEmail').value.trim();
+  const value = {};
+  if (un) value.username = un;
+  if (ph) value.phone = ph;
+  if (em) value.email = em;
+  if (!Object.keys(value).length) {
+    toast('Enter at least one subject — username, phone number or email address.', 'warn');
+    return;
+  }
+  const wanted = [];
+  QTYPES.forEach(k => {
+    if (value[k]) getSelectedTools(k).forEach(id => wanted.push({ tool: id, qtype: k }));
+  });
+  if (!wanted.length) {
+    toast('Select at least one installed tool for the subjects you entered.', 'warn');
+    return;
+  }
+  postScan({
+    type: 'multi',
+    value: value,
+    tools: wanted.map(w => w.tool),
+    options: { timeout: parseInt($('#caseTimeout').value, 10) || 10, sites: null, sites_filter: null }
+  }, 'case', wanted);
+}
+
+/* 02 — DATING: username → maigret only. */
+function startDating() {
+  const un = $('#datingInput').value.replace(/^@+/, '').trim();
+  if (!un) { toast('Enter a username to sweep.', 'warn'); return; }
+  const tools = getSelectedTools('dating');
+  if (!tools.length) { toast('maigret is not installed on the server.', 'warn'); return; }
+  postScan({
+    type: 'username',
+    value: un,
+    tools: tools,
+    options: { timeout: parseInt($('#datingTimeout').value, 10) || 10, sites: null, sites_filter: null }
+  }, 'dating', [{ tool: 'maigret', qtype: 'username' }]);
+}
+
+/* ============================================================
+   job view — open / data / live
+============================================================ */
+function showJobView(show) {
+  $('#jobView').hidden = !show;
+  $('#scannerArea').hidden = show;
+  if (show) window.scrollTo(0, 0);
+}
+
+async function openJob(id, origin, wanted) {
+  stopLive();
+  state.jobId = id;
+  state.job = null;
+  state.jobOrigin = origin || '';
+  state.jobWanted = (wanted && wanted.length) ? wanted.slice() : null;
+  state.jobLoadedAt = Date.now();
+  state.frozenAt = null;
+  state.concluded = false;
+  state.logLines = [];
+  state.consolePaused = false;
+  state.expanded = {};
+  consoleEl.textContent = '';
+  consoleEl.scrollTop = 0;
+  renderJobHeader();
+  renderJobTools();
+  updateConsoleState();
+  showJobView(true);
+  appendLog(null, null, '— job ' + id + ' opened —');
+
+  let loaded = false;
+  try {
+    const r = await api('/api/jobs/' + encodeURIComponent(id));
+    if (r.ok && r.data && r.data.id) {
+      if (!state.jobWanted) {
+        state.jobWanted = (r.data.results || [])
+          .map(x => ({ tool: x.tool, qtype: x.qtype || fallbackForSingle(r.data) }))
+          .filter(w => w.tool);
+      }
+      applyJobData(r.data, { silent: isTerminal(r.data.status) });
+      loaded = true;
+    } else if (r.status === 404) {
+      toast('Job not found: ' + id, 'error');
+      showJobView(false);
+      setScanning(false);
+      renderResumeChip();
+      return;
+    } else {
+      toast('Could not load job (HTTP ' + r.status + ').', 'error');
+    }
+  } catch (_) {
+    toast('Network error loading job.', 'error');
+  }
+
+  if (state.jobId !== id) return; /* user moved on mid-fetch */
+  if (state.job && !isTerminal(state.job.status)) {
+    setScanning(true);
+    startLive(id);
+  } else {
+    setScanning(false);
+    if (loaded && state.job) concludeJob(true);
+  }
+}
+
+function applyJobData(data, opts) {
+  if (!data) return;
+  opts = opts || {};
+  const prev = state.job;
+  const prevStatus = prev ? prev.status : undefined;
+  state.job = Object.assign({}, prev || { id: state.jobId }, data);
+
+  if (typeof data.log_tail === 'string' && data.log_tail.length) {
+    const tail = data.log_tail.replace(/\n+$/, '').split('\n')
+      .map(t => ({ tool: null, qtype: null, text: t }));
+    if (tail.length) {
+      const merged = mergeTail(state.logLines, tail);
+      const added = merged.slice(state.logLines.length);
+      state.logLines = merged.slice(-MAX_LOG_LINES);
+      for (const l of added) appendLog(l.tool, l.qtype, l.text);
+    }
+  }
+
+  renderJobHeader();
+  renderJobTools();
+
+  if (isTerminal(state.job.status) && !isTerminal(prevStatus)) concludeJob(!!opts.silent);
+}
+
+/* Merge a fresh log_tail (suffix of the server log) onto what we have. */
+function mergeTail(prev, tail) {
+  if (!tail.length) return prev;
+  if (!prev.length) return tail.slice();
+  const max = Math.min(prev.length, tail.length, 200);
+  for (let k = max; k > 0; k--) {
+    let same = true;
+    for (let i = 0; i < k; i++) {
+      const a = prev[prev.length - k + i];
+      const b = tail[i];
+      if (a.text !== b.text || (a.tool || null) !== (b.tool || null)) { same = false; break; }
+    }
+    if (same) return prev.concat(tail.slice(k));
+  }
+  return prev.concat(tail); /* no overlap → assume brand-new lines */
+}
+
+function appendLog(tool, qtype, text) {
+  const row = el('div', 'log-line');
+  if (tool) {
+    row.dataset.tool = tool;
+    if (qtype) row.dataset.qtype = qtype;
+    row.appendChild(el('span', 'log-tool', tool + (qtype ? '·' + qtype : '')));
+  }
+  row.appendChild(el('span', 'log-text', String(text == null ? '' : text)));
+  consoleEl.appendChild(row);
+  while (consoleEl.childElementCount > MAX_LOG_LINES) consoleEl.firstElementChild.remove();
+  if (!state.consolePaused) consoleEl.scrollTop = consoleEl.scrollHeight;
+}
+
+/* When falling back from SSE to polling, seed the merge array from the DOM. */
+function rebuildLogLinesFromDom() {
+  state.logLines = [];
+  consoleEl.querySelectorAll('.log-line').forEach(r => {
+    const t = r.querySelector('.log-text');
+    state.logLines.push({ tool: r.dataset.tool || null, qtype: r.dataset.qtype || null, text: t ? t.textContent : '' });
+  });
+}
+
+/* ---------- live updates ---------- */
+function startLive(id) {
+  if (getToken() || typeof EventSource === 'undefined') startPolling(id);
+  else startStream(id);
+}
+
+function stopLive() {
+  if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+  if (state.es) { try { state.es.close(); } catch (_) {} state.es = null; }
+}
+
+function startPolling(id) {
+  stopLive();
+  rebuildLogLinesFromDom();
+  state.pollTimer = setInterval(async () => {
+    if (state.jobId !== id) { stopLive(); return; }
+    try {
+      const r = await api('/api/jobs/' + encodeURIComponent(id));
+      if (state.jobId !== id) return;
+      if (r.ok && r.data) applyJobData(r.data);
+      else if (r.status === 404) { concludeJob(false); toast('Job disappeared (404).', 'error'); }
+    } catch (_) { /* transient network issue — keep trying */ }
+  }, POLL_MS);
+  updateConsoleState();
+}
+
+function startStream(id) {
+  stopLive();
+  const url = getBase() + '/api/jobs/' + encodeURIComponent(id) + '/stream';
+  let es;
+  try { es = new EventSource(url); }
+  catch (_) { startPolling(id); return; }
+  state.es = es;
+  es.addEventListener('snapshot', ev => {
+    const d = safeParse(ev.data);
+    if (d && d.id) applyJobData(d);
+  });
+  es.addEventListener('log', ev => {
+    const d = safeParse(ev.data);
+    if (d) appendLog(d.tool || null, d.qtype || null, d.line != null ? String(d.line) : '');
+  });
+  es.addEventListener('found', ev => {
+    const d = safeParse(ev.data);
+    if (d && d.tool) addFound(d.tool, d.qtype, d.item);
+  });
+  es.addEventListener('info', ev => {
+    const d = safeParse(ev.data);
+    if (d && d.tool) addInfo(d.tool, d.qtype, d.item);
+  });
+  es.addEventListener('tool_done', ev => {
+    const d = safeParse(ev.data);
+    if (d && d.tool) toolDone(d.tool, d.qtype, d);
+  });
+  es.addEventListener('job_done', ev => {
+    const d = safeParse(ev.data) || {};
+    finishStream(d.status || 'done');
+  });
+  es.onerror = () => {
+    if (state.jobId !== id) { es.close(); return; }
+    if (state.job && isTerminal(state.job.status)) { es.close(); state.es = null; return; }
+    es.close();           /* stream dropped mid-job → fall back to polling */
+    state.es = null;
+    startPolling(id);
+  };
+  updateConsoleState();
+}
+
+async function finishStream(fallbackStatus) {
+  const id = state.jobId;
+  stopLive();
+  try {
+    const r = await api('/api/jobs/' + encodeURIComponent(id));
+    if (r.ok && r.data && state.jobId === id) applyJobData(r.data);
+  } catch (_) {}
+  if (state.jobId === id && state.job && !isTerminal(state.job.status)) {
+    state.job.status = fallbackStatus;
+    applyJobData(state.job);
+  }
+}
+
+/* ---------- incremental (SSE) result mutation ---------- */
+function ensureResult(tool, qtype) {
+  if (!state.job) state.job = { id: state.jobId, results: [] };
+  if (!Array.isArray(state.job.results)) state.job.results = [];
+  const qt = qtype || fallbackQtype(state.job);
+  let r = state.job.results.find(x => x.tool === tool && (x.qtype || fallbackQtype(state.job)) === qt);
+  if (!r) {
+    r = { tool: tool, qtype: qt, status: 'running', found: [], info: [], error: null, found_count: null };
+    state.job.results.push(r);
+  }
+  return r;
+}
+
+function addFound(tool, qtype, item) {
+  if (!item) return;
+  const r = ensureResult(tool, qtype);
+  if (!Array.isArray(r.found)) r.found = [];
+  const url = item.url != null ? String(item.url) : '';
+  const site = item.site != null ? String(item.site) : '';
+  if (url && r.found.some(f => (f.url != null ? String(f.url) : '') === url && (f.site != null ? String(f.site) : '') === site)) return;
+  r.found.push(item);
+  if (r.status === 'queued') r.status = 'running';
+  renderJobHeader();
+  renderJobTools();
+}
+
+function addInfo(tool, qtype, item) {
+  if (!item) return;
+  const r = ensureResult(tool, qtype);
+  if (!Array.isArray(r.info)) r.info = [];
+  const key = item.key != null ? String(item.key) : '';
+  const val = item.value != null ? String(item.value) : '';
+  const url = item.url != null ? String(item.url) : '';
+  if (r.info.some(i => (i.key != null ? String(i.key) : '') === key && (i.value != null ? String(i.value) : '') === val && (i.url != null ? String(i.url) : '') === url)) return;
+  r.info.push(item);
+  if (r.status === 'queued') r.status = 'running';
+  renderJobHeader();
+  renderJobTools();
+}
+
+function toolDone(tool, qtype, d) {
+  const r = ensureResult(tool, qtype);
+  if (d && d.status) r.status = d.status; else r.status = 'done';
+  if (d && d.found_count != null) r.found_count = d.found_count;
+  if (d && d.info_count != null) r.info_count = d.info_count;
+  renderJobHeader();
+  renderJobTools();
+}
+
+/* ---------- terminal ---------- */
+function concludeJob(silent) {
+  stopLive();
+  setScanning(false);
+  state.frozenAt = Date.now();
+  if (!state.job || state.concluded) return;
+  state.concluded = true;
+  if (!silent) {
+    if (state.job.status === 'error') {
+      toast('Job ended with an error — check the log.', 'error');
+    } else {
+      const n = (state.job.results || []).reduce((a, r) => {
+        const found = Array.isArray(r.found) ? r.found.length : 0;
+        return a + (r.found_count != null ? Math.max(r.found_count, found) : found);
+      }, 0);
+      toast('Case closed — ' + n + ' item(s) found.', 'success');
+    }
+  }
+  renderJobHeader();
+  renderJobTools();
+  updateConsoleState();
+}
+
+/* ============================================================
+   job view rendering — dossier header + exhibit columns
+============================================================ */
+function statusBadge(status) {
+  const s = String(status || 'queued').toLowerCase();
+  const known = (s === 'queued' || s === 'running' || s === 'done' || s === 'error') ? s : 'queued';
+  const b = el('span', 'badge badge-' + known);
+  b.appendChild(el('span', 'dot'));
+  b.appendChild(document.createTextNode(known)); /* [dot][text] */
+  return b;
+}
+
+function renderJobHeader() {
+  const j = state.job;
+  $('#jobValue').textContent = (j && subjectLine(j)) || '…';
+  const host = $('#jobStatus');
+  host.textContent = '';
+  host.appendChild(statusBadge(j ? j.status : 'queued'));
+  $('#jobId').textContent = state.jobId || '';
+  const dating = state.jobOrigin === 'dating';
+  $('#datingFilterWrap').hidden = !dating;
+  if (dating) $('#datingFilter').checked = !!state.datingOnly;
+  $('#exportJson').disabled = !j;
+  $('#exportMd').disabled = !j;
+  updateElapsed();
+  updateConsoleState();
+}
+
+function renderJobTools() {
+  const hostEl = $('#jobTools');
+  if (!hostEl) return;
+  hostEl.textContent = '';
+  const job = state.job;
+  const cols = jobColumns(job);
+  if (!cols.length) {
+    hostEl.appendChild(el('p', 'muted', 'Waiting for job data…'));
+    return;
+  }
+  const results = (job && Array.isArray(job.results)) ? job.results : [];
+  const grid = el('div', 'exhibits');
+  cols.forEach((c, idx) => grid.appendChild(buildExhibitColumn(c, idx, job, results)));
+  hostEl.appendChild(grid);
+}
+
+function buildExhibitColumn(c, idx, job, results) {
+  const letter = String.fromCharCode(65 + idx);   /* EXHIBIT A / B / C */
+  const col = el('section', 'exhibit-col card');
+  col.setAttribute('aria-label', 'Exhibit ' + letter + ' — ' + c.qtype);
+
+  const head = el('div', 'exhibit-head');
+  head.appendChild(el('span', 'exhibit-tag', 'Exhibit ' + letter));
+  head.appendChild(el('h3', 'exhibit-kind', c.qtype));
+  col.appendChild(head);
+  col.appendChild(el('p', 'exhibit-value', c.value || '—'));
+
+  const fb = fallbackQtype(job);
+  const colResults = results.filter(r => (r && r.qtype ? r.qtype : fb) === c.qtype);
+  const wanted = (state.jobWanted || []).filter(w => w.qtype === c.qtype).map(w => w.tool);
+  const order = [];
+  wanted.forEach(t => { if (!order.includes(t)) order.push(t); });
+  colResults.forEach(r => { if (r && r.tool && !order.includes(r.tool)) order.push(r.tool); });
+
+  const body = el('div', 'exhibit-body');
+  if (!order.length) {
+    body.appendChild(el('p', 'tr-empty', 'Awaiting tool results…'));
+  } else {
+    const byTool = new Map(colResults.map(r => [r.tool, r]));
+    order.forEach(t => {
+      const r = byTool.get(t) || { tool: t, qtype: c.qtype, status: 'queued', found: [], info: [], error: null };
+      body.appendChild(buildToolCard(r));
+    });
+  }
+  col.appendChild(body);
+  return col;
+}
+
+function applyDatingFilter(list) {
+  if (!(state.jobOrigin === 'dating' && state.datingOnly)) return list;
+  return list.filter(f => isDatingUrl(f && f.url));
+}
+
+function datingFilterNote(total, visible) {
+  if (!(state.jobOrigin === 'dating' && state.datingOnly)) return '';
+  if (visible === total) return total ? 'Filtered to known dating platforms.' : '';
+  return 'Showing ' + visible + ' of ' + total + ' — dating platforms only.';
+}
+
+function foundSummary(r) {
+  const found = Array.isArray(r.found) ? r.found : [];
+  const reported = (r.found_count != null) ? r.found_count : null;
+  const total = Math.max(reported != null ? reported : 0, found.length);
+  if (!total) return r.status === 'done' ? '0 found' : '—';
+  const visible = applyDatingFilter(found).length;
+  if (state.jobOrigin === 'dating' && state.datingOnly && visible < total) return visible + '/' + total + ' shown';
+  if (reported != null && reported > found.length) return reported + ' found';
+  return total + ' found';
+}
+
+function infoFacts(r) { return (Array.isArray(r.info) ? r.info : []).filter(i => i && i.url == null); }
+function infoPivots(r) { return (Array.isArray(r.info) ? r.info : []).filter(i => i && i.url != null); }
+
+function buildToolCard(r) {
+  const key = r.tool + '|' + (r.qtype || '');
+  const expanded = state.expanded[key] !== false;
+  const card = el('article', 'tool-result' + (expanded ? ' open' : ''));
+  const headId = 'trh-' + r.tool + '-' + (r.qtype || 'x');
+
+  const head = el('button', 'tr-head');
+  head.type = 'button';
+  head.id = headId;
+  head.setAttribute('aria-expanded', String(expanded));
+  head.setAttribute('aria-controls', headId + '-body');
+  head.appendChild(chevronEl());
+  head.appendChild(el('span', 'tr-name', r.tool));
+  if (r.qtype) head.appendChild(el('span', 'tr-qtype', r.qtype));
+  const meta = el('span', 'tr-meta');
+  meta.appendChild(statusBadge(r.status));
+  meta.appendChild(el('span', 'tr-count', foundSummary(r)));
+  head.appendChild(meta);
+
+  const body = el('div', 'tr-body');
+  body.id = headId + '-body';
+  if (!expanded) body.hidden = true;
+
+  head.addEventListener('click', () => {
+    const now = state.expanded[key] === false; /* toggle */
+    state.expanded[key] = now;
+    card.classList.toggle('open', now);
+    head.setAttribute('aria-expanded', String(now));
+    body.hidden = !now;
+  });
+
+  if (r.error) body.appendChild(el('p', 'tr-error', 'error: ' + r.error));
+
+  /* found accounts → evidence tags */
+  const found = Array.isArray(r.found) ? r.found : [];
+  const visible = applyDatingFilter(found);
+  if (visible.length) {
+    const list = el('ul', 'ev-list');
+    visible.forEach(f => list.appendChild(evidenceRow(f)));
+    body.appendChild(list);
+  } else {
+    body.appendChild(el('p', 'tr-empty',
+      r.status === 'done' ? 'No accounts found on this tool.' : 'Waiting for results…'));
+  }
+  const note = datingFilterNote(found.length, visible.length);
+  if (note) body.appendChild(el('p', 'tr-note', note));
+
+  /* dossier facts (phoneinfoga info, non-pivot rows) */
+  const facts = infoFacts(r);
+  if (facts.length) {
+    const box = el('div', 'facts');
+    box.appendChild(el('div', 'facts-cap', 'Dossier facts · ' + facts.length));
+    facts.forEach(i => {
+      const row = el('div', 'fact');
+      row.appendChild(el('span', 'k', i.key != null ? String(i.key) : '—'));
+      row.appendChild(el('span', 'v', i.value != null ? String(i.value) : '—'));
+      box.appendChild(row);
+    });
+    body.appendChild(box);
+  }
+
+  /* search pivots — collapsible block of links */
+  const pivots = infoPivots(r);
+  if (pivots.length) {
+    const det = el('details', 'pivots');
+    det.appendChild(el('summary', null, 'Search pivots (' + pivots.length + ')'));
+    const list = el('div', 'pivot-list');
+    pivots.forEach(i => {
+      const a = document.createElement('a');
+      const url = String(i.url != null ? i.url : '');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = i.key != null && i.key !== '' ? String(i.key) : url;
+      a.title = url;
+      list.appendChild(a);
+    });
+    det.appendChild(list);
+    body.appendChild(det);
+  }
+
+  card.appendChild(head);
+  card.appendChild(body);
+  return card;
+}
+
+function evidenceRow(f) {
+  const li = el('li', 'ev');
+  li.appendChild(el('span', 'ev-site', f.site != null ? String(f.site) : (f.url != null ? String(f.url) : 'result')));
+  const u = f.url != null ? String(f.url) : '';
+  if (/^https?:\/\//i.test(u)) {
+    const a = document.createElement('a');
+    a.className = 'ev-url';
+    a.href = u;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = u;
+    li.appendChild(a);
+  } else if (u) {
+    li.appendChild(el('span', 'ev-nourl', u));
+  } else {
+    li.appendChild(el('span', 'ev-nourl', ''));
+  }
+  if (f.http_status != null && f.http_status !== '') {
+    const hs = el('span', 'ev-http', String(f.http_status));
+    const n = Number(f.http_status);
+    if (n >= 200 && n < 300) hs.classList.add('ok');
+    else if (n >= 400) hs.classList.add('bad');
+    else hs.classList.add('mid');
+    li.appendChild(hs);
+  }
+  return li;
+}
+
+/* ---------- elapsed ---------- */
+function updateElapsed() {
+  const e = $('#jobElapsed');
+  if (!e) return;
+  if (!state.job) { e.textContent = ''; return; }
+  const start = toMs(state.job.created_at) || state.jobLoadedAt;
+  const end = toMs(state.job.finished_at) || state.frozenAt || Date.now();
+  e.textContent = 'elapsed ' + fmtDur((end - start) / 1000);
+}
+
+function tick() {
+  if (state.job && !$('#jobView').hidden) updateElapsed();
+}
+
+/* ---------- console state ---------- */
+function updateConsoleState() {
+  const s = $('#consoleState');
+  const live = !!(state.job && !isTerminal(state.job.status) && (state.pollTimer || state.es));
+  if (state.consolePaused) {
+    s.textContent = 'paused';
+    s.className = 'console-state paused';
+    $('#jumpLatest').hidden = false;
+  } else if (live) {
+    s.textContent = 'live';
+    s.className = 'console-state live';
+    $('#jumpLatest').hidden = true;
+  } else {
+    s.textContent = '';
+    s.className = 'console-state';
+    $('#jumpLatest').hidden = true;
+  }
+}
+
+/* ============================================================
+   dating filter (shared between Dating sheet + job view)
+============================================================ */
+function setDatingOnly(v) {
+  state.datingOnly = !!v;
+  if (state.datingOnly) lsSet(LS_DATING, '1'); else lsDel(LS_DATING);
+  const a = $('#datingOnly');
+  const b = $('#datingFilter');
+  if (a) a.checked = state.datingOnly;
+  if (b) b.checked = state.datingOnly;
+  renderJobTools();
+}
+
+/* ============================================================
+   exports — case report (dossier Markdown) + JSON
+============================================================ */
+function reportBaseName() {
+  const v = jobColumns(state.job).map(c => c.value).join('-') || 'target';
+  const slug = v.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'target';
+  return 'osint-report-' + slug + '-' + new Date().toISOString().slice(0, 10);
+}
+
+function mdCell(v) {
+  return String(v == null ? '' : v).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
+function buildMarkdown(job) {
+  const cols = jobColumns(job);
+  const out = [];
+  out.push('# CASE REPORT — QALARC OSINT HUB');
+  out.push('');
+  out.push('- **Case №:** ' + caseNo());
+  out.push('- **Job ID:** ' + (job.id != null ? String(job.id) : ''));
+  out.push('- **Job type:** ' + (job.type != null ? String(job.type) : ''));
+  out.push('- **Status:** ' + (job.status != null ? String(job.status) : ''));
+  out.push('- **Generated:** ' + new Date().toISOString());
+  const cs = toMs(job.created_at);
+  if (cs) out.push('- **Opened:** ' + new Date(cs).toISOString());
+  const cf = toMs(job.finished_at);
+  if (cf) out.push('- **Closed:** ' + new Date(cf).toISOString());
+  out.push('');
+  out.push('## SUBJECTS');
+  cols.forEach(c => out.push('- **' + c.qtype.toUpperCase() + ':** ' + mdCell(c.value)));
+  out.push('');
+
+  const results = Array.isArray(job.results) ? job.results : [];
+  const fb = fallbackQtype(job);
+  let total = 0;
+  cols.forEach((c, idx) => {
+    out.push('## EXHIBIT ' + String.fromCharCode(65 + idx) + ' — ' + c.qtype.toUpperCase() + ' (`' + mdCell(c.value) + '`)');
+    out.push('');
+    const colResults = results.filter(r => (r && r.qtype ? r.qtype : fb) === c.qtype);
+    if (!colResults.length) {
+      out.push('_No tool results for this exhibit._');
+      out.push('');
+      return;
+    }
+    colResults.forEach(r => {
+      const found = Array.isArray(r.found) ? r.found : [];
+      const n = (r.found_count != null) ? Math.max(r.found_count, found.length) : found.length;
+      total += n;
+      out.push('### ' + (r.tool || 'tool') + ' (' + (r.status || '?') + ') — ' + n + ' found');
+      out.push('');
+      if (r.error) {
+        out.push('> Error: ' + mdCell(r.error));
+        out.push('');
+      }
+      if (found.length) {
+        out.push('| Site | URL | HTTP |');
+        out.push('| --- | --- | --- |');
+        found.forEach(f => out.push('| ' + mdCell(f.site) + ' | ' + mdCell(f.url) + ' | ' + mdCell(f.http_status) + ' |'));
+        out.push('');
+      } else {
+        out.push('_No accounts found on this tool._');
+        out.push('');
+      }
+      const facts = infoFacts(r);
+      if (facts.length) {
+        out.push('| Fact | Value |');
+        out.push('| --- | --- |');
+        facts.forEach(i => out.push('| ' + mdCell(i.key) + ' | ' + mdCell(i.value) + ' |'));
+        out.push('');
+      }
+      const pivots = infoPivots(r);
+      if (pivots.length) {
+        out.push('**Search pivots:**');
+        pivots.forEach(i => out.push('- [' + mdCell(i.key || i.url) + '](' + mdCell(i.url) + ')'));
+        out.push('');
+      }
+    });
+  });
+
+  out.push('---');
+  out.push('');
+  out.push('**Total: ' + total + ' item(s) across ' + results.length + ' tool run(s).**');
+  out.push('');
+  out.push('Generated by qalarc · OSINT Hub — for authorized security research, exposure assessment & identity verification only. Not for stalking or harassment.');
+  return out.join('\n') + '\n';
+}
+
+/* ============================================================
+   resume chip
+============================================================ */
+function renderResumeChip() {
+  const row = $('#resumeRow');
+  if (!row) return;
+  const id = lsGet(LS_LAST);
+  if (!id || !state.online) { row.hidden = true; return; }
+  $('#resumeJobId').textContent = id;
+  row.hidden = false;
+}
+
+/* ============================================================
+   settings
+============================================================ */
+function openSettings() {
+  const modal = $('#settingsModal');
+  $('#settingsBase').value = lsGet(LS_BASE) || '';
+  $('#settingsToken').value = lsGet(LS_TOKEN) || '';
+  if (!modal.open) modal.showModal();
+}
+
+function saveSettings() {
+  const base = $('#settingsBase').value.trim().replace(/\/+$/, '');
+  const token = $('#settingsToken').value.trim();
+  if (base && !/^https?:\/\//i.test(base)) {
+    toast('API base URL should start with http:// or https:// (or be empty for same origin).', 'warn');
+    return;
+  }
+  if (base) lsSet(LS_BASE, base); else lsDel(LS_BASE);
+  if (token) lsSet(LS_TOKEN, token); else lsDel(LS_TOKEN);
+  $('#settingsModal').close();
+  toast('Settings saved — re-checking API…', 'success');
+  checkHealth();
+  fetchTools();
+}
+
+/* ============================================================
+   pointer HUD — crosshair + coordinate chip + red laser pool
+============================================================ */
+function initPointerHud() {
+  const fine = window.matchMedia && window.matchMedia('(hover:hover) and (pointer:fine)').matches;
+  if (!fine) return;
+  const lx = $('.xh .lx');
+  const ly = $('.xh .ly');
+  const spot = $('.bp-spot');
+  if (!lx || !ly || !spot) return;
+  let raf = null;
+  let px = 0;
+  let py = 0;
+  const apply = () => {
+    raf = null;
+    lx.style.transform = 'translateY(' + py + 'px)';
+    ly.style.transform = 'translateX(' + px + 'px)';
+    spot.style.transform = 'translate(' + px + 'px,' + py + 'px)';
+  };
+  window.addEventListener('pointermove', e => {
+    px = e.clientX;
+    py = e.clientY;
+    if (!raf) raf = requestAnimationFrame(apply);
+  }, { passive: true });
+}
+
+/* ============================================================
+   bindings & init
+============================================================ */
+function bindUI() {
+  /* tabs */
+  TABS.forEach(t => $('#tab-' + t).addEventListener('click', () => selectTab(t)));
+  $('#tabsNav').addEventListener('keydown', onTabsKeydown);
+
+  /* scan buttons */
+  $('#caseScan').addEventListener('click', startCase);
+  $('#datingScan').addEventListener('click', startDating);
+
+  /* Enter submits the scan */
+  [['caseUsername'], ['casePhone'], ['caseEmail']].forEach(p => {
+    $('#' + p[0]).addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); $('#caseScan').click(); }
+    });
+  });
+  $('#datingInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); $('#datingScan').click(); }
+  });
+
+  /* settings */
+  $('#settingsBtn').addEventListener('click', openSettings);
+  $('#apiPill').addEventListener('click', openSettings);
+  $('#settingsSave').addEventListener('click', saveSettings);
+  $('#settingsClose').addEventListener('click', () => $('#settingsModal').close());
+
+  /* resume chip */
+  $('#resumeBtn').addEventListener('click', () => {
+    const id = lsGet(LS_LAST);
+    if (id) openJob(id, 'resume');
+  });
+
+  /* archive */
+  $('#recentRefresh').addEventListener('click', refreshRecent);
+
+  /* job view */
+  $('#jobBack').addEventListener('click', () => {
+    showJobView(false);
+    renderResumeChip();
+  });
+  $('#exportJson').addEventListener('click', () => {
+    if (!state.job) return;
+    download(reportBaseName() + '.json', JSON.stringify(state.job, null, 2) + '\n', 'application/json');
+  });
+  $('#exportMd').addEventListener('click', () => {
+    if (!state.job) return;
+    download(reportBaseName() + '.md', buildMarkdown(state.job), 'text/markdown');
+  });
+
+  /* dating filter (both checkboxes share state) */
+  $('#datingOnly').addEventListener('change', e => setDatingOnly(e.target.checked));
+  $('#datingFilter').addEventListener('change', e => setDatingOnly(e.target.checked));
+
+  /* console autoscroll / pause-on-scroll-up */
+  consoleEl.addEventListener('scroll', () => {
+    const atBottom = consoleEl.scrollHeight - consoleEl.scrollTop - consoleEl.clientHeight < 32;
+    state.consolePaused = !atBottom;
+    updateConsoleState();
+  });
+  $('#jumpLatest').addEventListener('click', () => {
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+    state.consolePaused = false;
+    updateConsoleState();
+  });
+}
+
+function init() {
+  $('#caseNo').textContent = '№' + caseNo();
+  state.datingOnly = lsGet(LS_DATING) === '1';
+  bindUI();
+  initPointerHud();
+  selectTab('case');
+  $('#datingOnly').checked = state.datingOnly;
+  renderChips();          /* placeholder state until tools arrive */
+  renderToolsGrid();
+  renderResumeChip();
+  setInterval(tick, 1000);                                      /* elapsed timer */
+  setInterval(() => { if (state.online === false) checkHealth(); }, 30000); /* offline auto-retry */
+  Promise.all([checkHealth(), fetchTools()]);                   /* parallel on load */
+}
+
+init();
+
+})();
+</script>
+</body>
+</html>
