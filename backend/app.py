@@ -39,6 +39,7 @@ if os.environ.get("OSINT_HUB_CORS", "1") == "1":
 USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 PHONE_RE = re.compile(r"^\+?[0-9][0-9 ()\-]{6,24}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
+IMAGE_URL_RE = re.compile(r"^https?://\S{10,2048}$")
 
 
 def require_auth(authorization: str | None = Header(default=None)) -> None:
@@ -47,8 +48,8 @@ def require_auth(authorization: str | None = Header(default=None)) -> None:
 
 
 class ScanRequest(BaseModel):
-    type: str = Field(..., pattern="^(username|phone|email|multi)$")
-    value: str | dict
+    type: str = Field(..., pattern="^(username|phone|email|image|multi)$")
+    value: "str | dict"
     tools: list[str]
     options: dict = {}
 
@@ -81,6 +82,11 @@ def _validate_single(kind: str, value: str) -> str:
             raise HTTPException(
                 400, "invalid phone number (expected E.164-ish, 7-15 digits)"
             )
+    elif kind == "image":
+        if not IMAGE_URL_RE.match(value):
+            raise HTTPException(
+                400, "invalid image URL (must be a public http(s) image link)"
+            )
     else:  # email
         if not EMAIL_RE.match(value):
             raise HTTPException(400, "invalid email address")
@@ -95,11 +101,13 @@ def scan(req: ScanRequest, request: Request):
                 400, "multi scan expects value: {username?, phone?, email?}"
             )
         clean = {}
-        for kind in ("username", "phone", "email"):
+        for kind in ("username", "phone", "email", "image"):
             if req.value.get(kind):
                 clean[kind] = _validate_single(kind, str(req.value[kind]))
         if not clean:
-            raise HTTPException(400, "provide at least one of: username, phone, email")
+            raise HTTPException(
+                400, "provide at least one of: username, phone, email, image URL"
+            )
         value: str | dict = clean
         kinds_present = set(clean)
     else:
@@ -127,6 +135,7 @@ def scan(req: ScanRequest, request: Request):
         "timeout": min(int(req.options.get("timeout", 10) or 10), 60),
         "sites": [str(s) for s in (req.options.get("sites") or [])][:10],
         "sites_filter": req.options.get("sites_filter"),
+        "engines": [str(e) for e in (req.options.get("engines") or [])][:6] or None,
     }
     job = manager.create(req.type, value, valid, options)
     return {"job_id": job.id}

@@ -136,6 +136,17 @@ def _holehe(value: str, opts: dict):
     return ["holehe", value, "--no-color", "--no-clear"], None
 
 
+def _revimg(value: str, opts: dict):
+    engines = opts.get("engines") or ["yandex", "bing", "tineye"]
+    return [
+        str(VENV_BIN / "python"),
+        str(BASE_DIR / "runners" / "revimg.py"),
+        value,
+        "--engines",
+        ",".join(engines),
+    ], None
+
+
 # --- command builders -------------------------------------------------------
 # each returns (cmd_list, cwd_or_None); first element is the exe name to resolve
 
@@ -232,6 +243,14 @@ TOOLS: dict[str, dict] = {
         "hint": ".venv/bin/pip install holehe",
         "build": _holehe,
         "parse": lambda line: parse_plus_line(line, require_url=False),
+    },
+    "revimg": {
+        "name": "Image Discovery",
+        "kind": "image",
+        "description": "Reverse-image online discovery: finds pages where an image (or similar) appears — Yandex/Bing/TinEye. Discovery only; face analysis stays in qalarc's own face-engine stack.",
+        "hint": ".venv/bin/pip install PicImageSearch pyquery (plus lxml)",
+        "build": _revimg,
+        "parse": parse_plus_line,
     },
     "ignorant": {
         "name": "Ignorant",

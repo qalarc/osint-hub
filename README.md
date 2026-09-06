@@ -37,7 +37,7 @@ scripts/run.sh     # serves API + frontend at http://127.0.0.1:8799
 | `GET /api/jobs?limit=15` | recent jobs |
 
 - `found` = discovered accounts/profiles; `info` = structured intelligence (phoneinfoga number facts: E164/Local/Country/Carrier…, plus Google-dork "search pivot" links)
-- identifier kinds: **username** → sherlock, maigret · **phone** → phoneinfoga, ignorant, searchphone · **email** → holehe
+- identifier kinds: **username** → sherlock, maigret · **phone** → phoneinfoga, ignorant, searchphone · **email** → holehe · **image** → revimg (reverse-image online discovery: Yandex/Bing/TinEye pages where the image appears — discovery only; face analysis stays in qalarc's own face-engine stack). Options: `engines` (list), per-engine caps built in.
 
 Auth: set `OSINT_HUB_TOKEN` → all scan/job endpoints require `Authorization: Bearer <token>`.
 Rate limit: `OSINT_HUB_RATE_LIMIT` (default `20/hour` per IP). Concurrency: `OSINT_HUB_MAX_CONCURRENT` (default 2).
@@ -49,7 +49,7 @@ Full env reference: `backend/.env.example`.
 |---|---|
 | API | Python 3 · FastAPI · uvicorn · pydantic (request validation) |
 | Job engine | ThreadPoolExecutor job queue · per-tool subprocess execution with threading.Timer hard-kill (900s) · sliding-window rate limiter · atomic job persistence to `data/jobs/*.json` (200-file prune) · SSE streaming via cursor-based event log |
-| Scanners | sherlock (username→400+ sites) · maigret (username→3000+ incl. dating) · phoneinfoga (Go binary; phone intel + dorks) · ignorant (phone→registered accounts) · holehe (email→120+ services via password-reset flows) · searchphone (opt-in, API keys) |
+| Scanners | sherlock (username→400+ sites) · maigret (username→3000+ incl. dating) · phoneinfoga (Go binary; phone intel + dorks) · ignorant (phone→registered accounts) · holehe (email→120+ services via password-reset flows) · **revimg** (reverse-image online discovery via PicImageSearch: Yandex/Bing/TinEye — `backend/runners/revimg.py`) · searchphone (opt-in, API keys) |
 | Output parsing | ANSI-stripped stdout parsers per tool (`[+]`-line grammar, tool-specific require-url rules, legend-line filters, phoneinfoga key/value info extraction, country-code splitting via phonenumbers) |
 | Frontend | single-file vanilla JS + CSS — zero dependencies, no build step, SSE with 1.5s polling fallback when authed, steddi engineering-drawing art style (blueprint grid, film grain, laser scanline, mono dossier labels) |
 | Deploy model | frontend → any static host (Cloudflare Pages) · backend → any host with the scanner CLIs · API base URL configurable at runtime in the UI |

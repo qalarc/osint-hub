@@ -63,7 +63,7 @@ class Job:
         if type_ == "multi" and isinstance(value, dict):
             self.queries = [
                 (k, str(value[k]).strip())
-                for k in ("username", "phone", "email")
+                for k in ("username", "phone", "email", "image")
                 if value.get(k)
             ]
         else:

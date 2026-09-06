@@ -821,12 +821,19 @@ dialog::backdrop{background:rgba(10,6,8,.62);-webkit-backdrop-filter:blur(3px);b
           </div>
 
           <div class="field">
+            <label for="caseImage">Image URL — online discovery</label>
+            <input id="caseImage" type="url" placeholder="https://…/photo.jpg — reverse-image: pages where this face/photo appears" autocomplete="off" autocapitalize="off" spellcheck="false">
+          </div>
+
+          <div class="field">
             <span class="chips-label" id="caseUserToolsLabel">Usernames</span>
             <div class="chips" id="chipsUsername" role="group" aria-labelledby="caseUserToolsLabel"></div>
             <span class="chips-label" id="casePhoneToolsLabel" style="margin-top:14px">Phone</span>
             <div class="chips" id="chipsPhone" role="group" aria-labelledby="casePhoneToolsLabel"></div>
             <span class="chips-label" id="caseEmailToolsLabel" style="margin-top:14px">Email</span>
             <div class="chips" id="chipsEmail" role="group" aria-labelledby="caseEmailToolsLabel"></div>
+            <span class="chips-label" id="caseImageToolsLabel" style="margin-top:14px">Image discovery</span>
+            <div class="chips" id="chipsImage" role="group" aria-labelledby="caseImageToolsLabel"></div>
           </div>
 
           <div class="field-row">
@@ -1057,7 +1064,7 @@ const LS_DATING = 'osint_dating_only';
 const SS_CASE   = 'osint_case_no';
 
 const TABS = ['case', 'dating', 'tools', 'stack', 'recent'];
-const QTYPES = ['username', 'phone', 'email'];
+const QTYPES = ['username', 'phone', 'email', 'image'];
 
 /* Dating-platform hostname filter (Dating sheet "show only dating sites").
    Hostname match includes subdomains, "www." stripped. */
@@ -1199,7 +1206,7 @@ function isDatingUrl(u) {
 /* Query columns of a job: multi jobs carry value objects → one column per
    qtype present; single-type jobs carry a string value → one column. */
 function fallbackQtype(job) {
-  if (job && (job.type === 'username' || job.type === 'phone' || job.type === 'email')) return job.type;
+  if (job && ['username', 'phone', 'email', 'image'].includes(job.type)) return job.type;
   const cols = jobColumns(job);
   return cols.length ? cols[0].qtype : 'username';
 }
@@ -1218,7 +1225,7 @@ function jobColumns(job) {
 }
 
 function fallbackForSingle(job) {
-  return (job.type === 'phone' || job.type === 'email') ? job.type : 'username';
+  return ['phone', 'email', 'image'].includes(job.type) ? job.type : 'username';
 }
 
 function subjectLine(job) {
@@ -1403,7 +1410,7 @@ function renderChips() {
   const modeKey = state.mode === 'lite' ? 'lite' : 'full';
   if (renderChips._mode !== modeKey) {
     renderChips._mode = modeKey;
-    ['chipsUsername', 'chipsPhone', 'chipsEmail', 'datingChips'].forEach(id => {
+    ['chipsUsername', 'chipsPhone', 'chipsEmail', 'chipsImage', 'datingChips'].forEach(id => {
       const c = $('#' + id);
       if (c) delete c.dataset.init;
     });
@@ -1412,6 +1419,7 @@ function renderChips() {
   renderChipGroup($('#chipsUsername'), toolsForKind('username'), 'username');
   renderChipGroup($('#chipsPhone'), toolsForKind('phone'), 'phone');
   renderChipGroup($('#chipsEmail'), toolsForKind('email'), 'email');
+  renderChipGroup($('#chipsImage'), toolsForKind('image'), 'image');
   renderChipGroup($('#datingChips'), state.tools.filter(t => t.id === 'maigret'), 'dating');
 }
 
@@ -1428,6 +1436,8 @@ function renderChipGroup(container, tools, group) {
     let msg;
     if (state.mode === 'lite' && group === 'email') {
       msg = 'Email checks need the full backend (holehe) — lite cloud mode covers usernames and phone numbers.';
+    } else if (state.mode === 'lite' && group === 'image') {
+      msg = 'Image discovery needs the full backend (PicImageSearch engines) — lite cloud mode covers usernames and phone numbers.';
     } else if (state.mode === 'lite' && group === 'dating') {
       msg = 'Dating scans need the full backend (maigret) — 3000+ sites.';
     } else if (state.online === null) {
@@ -1605,12 +1615,14 @@ function startCase() {
   const un = $('#caseUsername').value.replace(/^@+/, '').trim();
   const ph = $('#casePhone').value.trim();
   const em = $('#caseEmail').value.trim();
+  const im = $('#caseImage').value.trim();
   const value = {};
   if (un) value.username = un;
   if (ph) value.phone = ph;
   if (em) value.email = em;
+  if (im) value.image = im;
   if (!Object.keys(value).length) {
-    toast('Enter at least one subject — username, phone number or email address.', 'warn');
+    toast('Enter at least one subject — username, phone number, email or image URL.', 'warn');
     return;
   }
   const wanted = [];
@@ -1661,12 +1673,18 @@ async function liteCase() {
   const un = $('#caseUsername').value.replace(/^@+/, '').trim();
   const ph = $('#casePhone').value.trim();
   const em = $('#caseEmail').value.trim();
+  const im = $('#caseImage') ? $('#caseImage').value.trim() : '';
 
   if (em && !un && !ph) {
     toast('Email checks need the full backend (holehe) — enter a username or phone number for a lite scan.', 'warn');
     return;
   }
+  if (im && !un && !ph) {
+    toast('Image discovery needs the full backend — enter a username or phone number for a lite scan.', 'warn');
+    return;
+  }
   if (em) toast('Skipping email — holehe email checks need the full backend.', 'info');
+  if (im) toast('Skipping image — reverse-image discovery needs the full backend.', 'info');
   if (!un && !ph) { toast('Enter a username or phone number to scan.', 'warn'); return; }
   if (un && !/^[A-Za-z0-9._-]{1,64}$/.test(un)) {
     toast('Invalid username (allowed: A-Z a-z 0-9 . _ - , max 64 chars).', 'warn');
@@ -2488,7 +2506,7 @@ function bindUI() {
   $('#datingScan').addEventListener('click', startDating);
 
   /* Enter submits the scan */
-  [['caseUsername'], ['casePhone'], ['caseEmail']].forEach(p => {
+  [['caseUsername'], ['casePhone'], ['caseEmail'], ['caseImage']].forEach(p => {
     $('#' + p[0]).addEventListener('keydown', e => {
       if (e.key === 'Enter') { e.preventDefault(); $('#caseScan').click(); }
     });
