@@ -84,6 +84,34 @@ ships disabled-but-recommended for localhost, and mandatory in the deploy checkl
 - **searchphone**: disabled unless `SEARCHPHONE_ENABLED=1` + API keys (see
   `../public_repos/osint/searchphone/example.env`).
 
+## MCP — agent access (`mcp/server.py`)
+
+AI agents can drive the hub directly. The server auto-detects the best backend:
+`$OSINT_HUB_URL` → local full backend (`127.0.0.1:8799`) → live lite engine (`https://osint.qalarc.com`).
+
+| Tool | What it does |
+|---|---|
+| `osint_status()` | connected hub, mode (full/lite), installed tools |
+| `osint_case(username?, phone?, email?, image_url?, max_wait)` | **the one-call case scan** — any mix of subjects, per-subject findings |
+| `osint_username/phone/email(...)` | focused single-subject scans |
+| `osint_image_search(image_url)` | reverse-image discovery (pages where the photo appears) |
+| `osint_dating(username)` | dating-platform sweep (maigret, full backend only) |
+| `osint_search_pivots(topic, kind="topic"\|"person")` | instant search launchers — works with NO hub (quick topic/name lookups) |
+
+Run: `backend/.venv/bin/python mcp/server.py` (stdio, MCP SDK v2). Env: `OSINT_HUB_URL`, `OSINT_HUB_TOKEN`.
+Note: sends a browser-ish User-Agent (Cloudflare bot protection 403s default Python UAs on osint.qalarc.com).
+
+Register (opencode/qalcode, `~/.config/opencode/opencode.jsonc` → `mcp`):
+```jsonc
+"osint-hub": {
+  "type": "local",
+  "command": ["/abs/path/to/qalarc_osint/backend/.venv/bin/python",
+               "/abs/path/to/qalarc_osint/mcp/server.py"],
+  "enabled": true, "timeout": 300000
+}
+```
+Claude Code: `claude mcp add -s user osint-hub -- <python> <mcp/server.py>`
+
 ## Legal / responsible use
 
 Username and phone lookups surface **publicly posted** profiles. Use for exposure
