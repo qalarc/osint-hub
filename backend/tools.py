@@ -251,6 +251,11 @@ TOOLS: dict[str, dict] = {
         "hint": ".venv/bin/pip install PicImageSearch pyquery (plus lxml)",
         "build": _revimg,
         "parse": parse_plus_line,
+        # library-runner tool (no console script) — installed = runner + venv python present
+        "enabled_check": lambda: (
+            (BASE_DIR / "runners" / "revimg.py").is_file()
+            and (VENV_BIN / "python").exists()
+        ),
     },
     "ignorant": {
         "name": "Ignorant",

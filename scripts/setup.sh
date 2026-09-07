@@ -21,6 +21,18 @@ for pkg in sherlock-project maigret ignorant holehe; do
   fi
 done
 
+echo "== 3b/4 MCP server deps =="
+if "$BACKEND/.venv/bin/pip" install -q mcp; then
+  echo "  installed: mcp (agents can use mcp/server.py)"
+else
+  echo "  WARN: could not install mcp — MCP server unavailable (web UI unaffected)"
+fi
+if "$BACKEND/.venv/bin/pip" install -q --only-binary :all: PicImageSearch pyquery; then
+  echo "  installed: PicImageSearch + pyquery (image discovery)"
+else
+  echo "  WARN: PicImageSearch failed (image discovery disabled)"
+fi
+
 echo "== 4/4 phoneinfoga binary (best-effort) =="
 mkdir -p "$BACKEND/bin"
 if [ -x "$BACKEND/bin/phoneinfoga" ]; then
