@@ -362,7 +362,10 @@ function litePivots(request) {
 export async function onRequest(context) {
   const request = context.request;
   const url = new URL(request.url);
-  const path = (url.pathname || '/').replace(/\/+$/, '') || '/';
+  /* prefix-agnostic routing: works at the root of a dedicated Pages project
+     (/api/...) AND scoped inside the qalarc.com site (/projects/osint-hub/api/...) */
+  const _i = url.pathname.indexOf('/api/');
+  const path = ((_i >= 0 ? url.pathname.slice(_i) : url.pathname) || '/').replace(/\/+$/, '') || '/';
   const method = request.method.toUpperCase();
 
   if (method === 'OPTIONS') {

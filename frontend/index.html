@@ -1116,7 +1116,14 @@ function lsDel(k) { try { localStorage.removeItem(k); } catch (_) {} }
 function ssGet(k) { try { return sessionStorage.getItem(k); } catch (_) { return null; } }
 function ssSet(k, v) { try { sessionStorage.setItem(k, v); } catch (_) {} }
 
-function getBase()  { return (lsGet(LS_BASE) || '').trim().replace(/\/+$/, ''); }
+function getBase() {
+  const stored = (lsGet(LS_BASE) || '').trim().replace(/\/+$/, '');
+  if (stored) return stored;
+  /* hosted inside the qalarc.com site (qalarc.ai repo): the lite engine serves
+     /projects/osint-hub/api/* — same origin, scoped route, zero config */
+  if (location.pathname.indexOf('/projects/osint-hub') === 0) return '/projects/osint-hub';
+  return '';
+}
 function getToken() { return (lsGet(LS_TOKEN) || '').trim(); }
 
 /* Case file number — random 4 digits, persisted per browser session. */
