@@ -192,7 +192,7 @@ def _split_phone(value: str) -> tuple[str, str]:
     v = re.sub(r"[ \-()]", "", value.strip())
     m = re.match(r"^\+(\d{1,3})(\d{4,})$", v)
     if not m:
-        raise ValueError("phone must be international format, e.g. +61425228338")
+        raise ValueError("phone must be international format, e.g. +61400000001")
     return f"+{m.group(1)}", m.group(2)
 
 

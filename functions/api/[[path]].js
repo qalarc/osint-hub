@@ -317,7 +317,7 @@ function litePivots(request) {
   }
   return readJsonBody(request).then(body => {
     if (!body || typeof body.value !== 'string') {
-      return json(400, { error: 'expected JSON body {"value":"+61425228338"}' });
+      return json(400, { error: 'expected JSON body {"value":"+61400000001"}' });
     }
     const raw = body.value.trim();
     const digits = raw.replace(/\D/g, '');
