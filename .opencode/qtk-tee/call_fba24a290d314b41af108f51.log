@@ -1,0 +1,1053 @@
+<file>
+00001| """pillars.py — HTTP clients for the five pillars (ARCHITECTURE 2: hub-and-spoke,
+00002| APIs only; the root app NEVER bypasses a pillar's API).
+00003| 
+00004| Liveness right now (2026-09-06 build night): ollama :11434, genmedia :8931 and
+00005| hub :8769 are up; ai_audio :8932 and archon :7843 may be down. Every function
+00006| here tolerates any combination without raising (except ollama_chat, which the
+00007| web layer turns into a 503).
+00008| 
+00009| REAL API shapes (inspected 2026-09-06, not assumed):
+00010|   genmedia  POST /api/characters      FORM-encoded (FastAPI Form(...)):
+00011|             name (required), description (required, becomes the canon block),
+00012|             style_tags (comma-separated), category. Slug is DERIVED by genmedia
+00013|             as slugify(name) (lowercase, non-alnum -> "_"). 409 on duplicate.
+00014|             GET /api/characters -> [{slug, name, canon, refs, seed, ...}]
+00015|   archon    POST /api/sandboxes       JSON {"name": str} -> sandbox dict
+00016|             {id, name, library_id ("project.sandbox.<slug>"), ...}.
+00017|             GET /api/sandboxes -> [sandbox dicts].
+00018|             CLI fallback exists: python -m knowledge_core sandboxes create NAME
+00019|   ollama    GET /api/tags -> {"models": [{"name": ...}]}
+00020|             POST /api/chat (stream=false) -> {"message": {"content": ...}}
+00021|   hub       GET /health -> {"ok": true, ...}
+00022|   ai_audio  any HTTP response on :8932 counts as up (no fixed health route).
+00023| """
+00024| 
+00025| from __future__ import annotations
+00026| 
+00027| import io
+00028| import json
+00029| import os
+00030| import subprocess
+00031| import sys
+00032| import urllib.error
+00033| import urllib.parse
+00034| import time
+00035| import urllib.request
+00036| import uuid
+00037| from pathlib import Path
+00038| 
+00039| # Pillar endpoints (ports.json is the registry; these are the claimed ones).
+00040| BASES = {
+00041|     "ollama": "http://127.0.0.1:11434",
+00042|     "genmedia": "http://127.0.0.1:8931",
+00043|     "ai_audio": "http://127.0.0.1:8932",
+00044|     "archon": "http://127.0.0.1:7843",
+00045|     "hub": "http://127.0.0.1:8769",
+00046| }
+00047| 
+00048| # Family rule (contract Non-negotiable 2): pillar call timeouts <= 5s, chat 120s.
+00049| STATUS_TIMEOUT = (2.0, 4.0)  # (connect, read) for status probes
+00050| CALL_TIMEOUT = (3.0, 5.0)  # for list/create calls
+00051| CHAT_TIMEOUT = (5.0, 120.0)  # ollama chat only
+00052| TTS_TIMEOUT = (3.0, 10.0)  # voice submit + job poll (never block > 10s)
+00053| TTS_FETCH_TIMEOUT = (3.0, 10.0)  # wav download (small files, slow disk ok)
+00054| 
+00055| # Archon CLI fallback location (used only when HTTP is unreachable).
+00056| ARCHON_REPO = Path.home() / "projects" / "Knowledge_systems"
+00057| 
+00058| 
+00059| class PillarError(RuntimeError):
+00060|     """A pillar call failed in a way the caller must handle (e.g. chat)."""
+00061| 
+00062| 
+00063| # --------------------------------------------------------------------------
+00064| # Low-level HTTP (module-level so tests can monkeypatch `pillars.http_json`)
+00065| # --------------------------------------------------------------------------
+00066| 
+00067| 
+00068| def http_json(method: str, url: str, json_body=None, form=None, timeout=CALL_TIMEOUT):
+00069|     """Perform one HTTP request; return (status:int, parsed_body) where
+00070|     parsed_body is a decoded JSON value when possible, else raw text.
+00071|     Raises urllib.error.* / OSError / json errors upward — callers wrap."""
+00072|     data = None
+00073|     headers = {"Accept": "application/json"}
+00074|     if json_body is not None:
+00075|         data = json.dumps(json_body).encode("utf-8")
+00076|         headers["Content-Type"] = "application/json"
+00077|     elif form is not None:
+00078|         data = urllib.parse.urlencode(form).encode("utf-8")
+00079|         headers["Content-Type"] = "application/x-www-form-urlencoded"
+00080|     req = urllib.request.Request(url, data=data, headers=headers, method=method.upper())
+00081|     with urllib.request.urlopen(req, timeout=max(timeout)) as resp:
+00082|         raw = resp.read()
+00083|     status = resp.status
+00084|     try:
+00085|         parsed = json.loads(raw.decode("utf-8")) if raw else None
+00086|     except (json.JSONDecodeError, UnicodeDecodeError):
+00087|         parsed = raw.decode("utf-8", "replace")
+00088|     return status, parsed
+00089| 
+00090| 
+00091| def archon_normalize_id(value: str) -> str:
+00092|     """Collapse an archon sandbox name/library_id to a comparable token.
+00093|     Archon prefixes libraries with 'project.sandbox.' and the platform writes
+00094|     'project.character.<slug>' style ids in manifests — strip the known
+00095|     prefixes from the FRONT (not the last dot-segment; the slug itself may
+00096|     contain dots) and drop non-alphanumerics:
+00097|       'project.sandbox.character_marrow' -> 'charactermarrow'
+00098|       'project.character.marrow'         -> 'charactermarrow'
+00099|       'character.marrow'                 -> 'charactermarrow'"""
+00100|     s = (value or "").lower().strip()
+00101|     if s.startswith("project.sandbox."):
+00102|         s = s[len("project.sandbox.") :]
+00103|     elif s.startswith("project."):
+00104|         s = s[len("project.") :]
+00105|     import re as _re
+00106| 
+00107|     return _re.sub(r"[^a-z0-9]+", "", s)
+00108| 
+00109| 
+00110| def archon_id_matches(desired: str, fields: dict) -> bool:
+00111|     """True when a sandbox dict (name/library_id/id) plausibly IS `desired`."""
+00112|     for key in ("name", "library_id", "id"):
+00113|         val = fields.get(key) or ""
+00114|         if val and (
+00115|             val == desired or archon_normalize_id(val) == archon_normalize_id(desired)
+00116|         ):
+00117|             return True
+00118|     return False
+00119| 
+00120| 
+00121| def _short(exc: Exception) -> str:
+00122|     """Compact one-line reason for a failure (no tracebacks in dots)."""
+00123|     msg = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
+00124|     return f"{exc.__class__.__name__}: {msg}"[:160]
+00125| 
+00126| 
+00127| # --------------------------------------------------------------------------
+00128| # status() — the five dots; NEVER raises
+00129| # --------------------------------------------------------------------------
+00130| 
+00131| 
+00132| def _probe(url: str) -> tuple[bool, str]:
+00133|     """One GET; any HTTP response at all means the service is listening.
+00134|     (404 from an unknown route still proves liveness.)"""
+00135|     try:
+00136|         status, _ = http_json("GET", url, timeout=STATUS_TIMEOUT)
+00137|         return True, f"ok (HTTP {status})"
+00138|     except urllib.error.HTTPError as exc:
+00139|         # An HTTP error is still a response from a live service.
+00140|         return True, f"ok (HTTP {exc.code})"
+00141|     except Exception as exc:  # noqa: BLE001 — status() must never raise
+00142|         return False, f"down ({_short(exc)})"
+00143| 
+00144| 
+00145| def status() -> dict:
+00146|     """{ollama, genmedia, ai_audio, archon, hub} each {"up": bool, "detail": str}."""
+00147|     out = {}
+00148|     for key, base in BASES.items():
+00149|         if key == "ai_audio":
+00150|             # No fixed health route known; "/" proves the port is listening.
+00151|             up, detail = _probe(base + "/")
+00152|         else:
+00153|             up, detail = _probe(base + _STATUS_PATHS[key])
+00154|         out[key] = {"up": up, "detail": detail}
+00155|     return out
+00156| 
+00157| 
+00158| _STATUS_PATHS = {
+00159|     "ollama": "/api/tags",
+00160|     "genmedia": "/api/characters",
+00161|     "archon": "/api/sandboxes",
+00162|     "hub": "/health",
+00163| }
+00164| 
+00165| 
+00166| # --------------------------------------------------------------------------
+00167| # genmedia (FACE)
+00168| # --------------------------------------------------------------------------
+00169| 
+00170| 
+00171| def genmedia_list_characters() -> list | None:
+00172|     """All non-archived genmedia characters, or None if the pillar is
+00173|     unreachable/erroring (down is distinct from empty)."""
+00174|     try:
+00175|         status_code, data = http_json("GET", BASES["genmedia"] + "/api/characters")
+00176|         if status_code == 200 and isinstance(data, list):
+00177|             return data
+00178|         return None
+00179|     except Exception:  # noqa: BLE001
+00180|         return None
+00181| 
+00182| 
+00183| def genmedia_create_character(slug: str, name: str, canon_text: str) -> dict:
+00184|     """Create a genmedia character. The real API is FORM-encoded (inspected):
+00185|     name + description are required Form fields; the genmedia slug is derived
+00186|     from the name via slugify(), so we pass the desired slug AS the name when
+00187|     no display name is given, and we return the slug genmedia actually made.
+00188|     Returns {"ok": bool, "exists": bool, "detail": str, "slug": str|None}."""
+00189|     display = (name or slug).strip() or slug
+00190|     form = {
+00191|         "name": display,
+00192|         "description": canon_text or "",
+00193|         "style_tags": "",
+00194|         "category": "",
+00195|     }
+00196|     url = BASES["genmedia"] + "/api/characters"
+00197|     try:
+00198|         status_code, data = http_json("POST", url, form=form)
+00199|         if status_code in (200, 201):
+00200|             real_slug = (data or {}).get("slug") if isinstance(data, dict) else None
+00201|             return {
+00202|                 "ok": True,
+00203|                 "exists": False,
+00204|                 "detail": f"created genmedia character {real_slug or display!r}",
+00205|                 "slug": real_slug or display,
+00206|                 "character": data,
+00207|             }
+00208|         if status_code == 409:
+00209|             return {
+00210|                 "ok": False,
+00211|                 "exists": True,
+00212|                 "detail": f"genmedia character already exists (409)",
+00213|                 "slug": slug,
+00214|                 "character": None,
+00215|             }
+00216|         if status_code == 422:  # defensive: API shape drift -> retry as JSON
+00217|             status_code, data = http_json(
+00218|                 "POST",
+00219|                 url,
+00220|                 json_body={"name": display, "description": canon_text or ""},
+00221|             )
+00222|             if status_code in (200, 201):
+00223|                 real_slug = (data or {}).get("slug") if isinstance(data, dict) else None
+00224|                 return {
+00225|                     "ok": True,
+00226|                     "exists": False,
+00227|                     "detail": f"created genmedia character {real_slug or display!r} (JSON body)",
+00228|                     "slug": real_slug or display,
+00229|                     "character": data,
+00230|                 }
+00231|         return {
+00232|             "ok": False,
+00233|             "exists": False,
+00234|             "detail": f"genmedia refused (HTTP {status_code}): {str(data)[:120]}",
+00235|             "slug": slug,
+00236|             "character": None,
+00237|         }
+00238|     except Exception as exc:  # noqa: BLE001
+00239|         return {
+00240|             "ok": False,
+00241|             "exists": False,
+00242|             "detail": f"genmedia unreachable ({_short(exc)})",
+00243|             "slug": slug,
+00244|             "character": None,
+00245|         }
+00246| 
+00247| 
+00248| def genmedia_enhance_prompt(
+00249|     prompt: str,
+00250|     style: str = "",
+00251|     content_tier: str = "sfw",
+00252|     model_target: str = "zimage",
+00253| ) -> dict:
+00254|     """Beat -> cinematic image prompt via POST /api/enhance_prompt (FORM).
+00255|     Provider chain (ollama -> Z.AI -> anthropic) is resolved genmedia-side
+00256|     when `provider` is blank — we always send it blank. Verified response:
+00257|     {"enhanced": str, "provider": str, "model_target": str}.
+00258|     Returns {"ok": True, "enhanced": str, "provider": str} or
+00259|     {"ok": False, "detail": str} — NEVER raises."""
+00260|     form = {
+00261|         "prompt": prompt or "",
+00262|         "provider": "",
+00263|         "model_target": model_target,
+00264|         "style": style or "",
+00265|         "content_tier": content_tier or "sfw",
+00266|     }
+00267|     try:
+00268|         status_code, data = http_json(
+00269|             "POST", BASES["genmedia"] + "/api/enhance_prompt", form=form
+00270|         )
+00271|         if status_code == 200 and isinstance(data, dict) and data.get("enhanced"):
+00272|             return {
+00273|                 "ok": True,
+00274|                 "enhanced": str(data["enhanced"]).strip(),
+00275|                 "provider": data.get("provider", "?"),
+00276|             }
+00277|         detail = (
+00278|             data.get("error") if isinstance(data, dict) else None
+00279|         ) or f"HTTP {status_code}: {str(data)[:120]}"
+00280|         return {"ok": False, "detail": str(detail)[:200]}
+00281|     except Exception as exc:  # noqa: BLE001
+00282|         return {"ok": False, "detail": f"genmedia unreachable ({_short(exc)})"}
+00283| 
+00284| 
+00285| def genmedia_generate(
+00286|     prompt: str,
+00287|     style: str = "",
+00288|     content_tier: str = "sfw",
+00289|     character_slugs: str = "",
+00290|     width: int = 1024,
+00291|     height: int = 1024,
+00292|     seed: str = "",
+00293|     steps: int = 8,
+00294|     model: str = "zimage",
+00295|     negative: str = "",
+00296| ) -> dict:
+00297|     """Submit an image job via POST /api/generate_image (FORM; auto-applies
+00298|     canon + character LoRAs + per-slug seed genmedia-side). Verified response:
+00299|     {"job_id": str, "job_ids": [str], "seeds": [int], "count": n,
+00300|      "resolved_prompt": str} — the job id field IS "job_id".
+00301|     Returns {"ok": True, "job_id", "seed", ...} or {"ok": False, "detail"} —
+00302|     NEVER raises."""
+00303|     form = {
+00304|         "prompt": prompt or "",
+00305|         "style": style or "",
+00306|         "content_tier": content_tier or "sfw",
+00307|         "character_slugs": character_slugs or "",
+00308|         "width": int(width),
+00309|         "height": int(height),
+00310|         "seed": str(seed) if seed not in (None, "") else "",
+00311|         "steps": int(steps),
+00312|         "negative": negative or "",
+00313|         "model": model or "zimage",
+00314|     }
+00315|     try:
+00316|         status_code, data = http_json(
+00317|             "POST", BASES["genmedia"] + "/api/generate_image", form=form
+00318|         )
+00319|         if status_code == 200 and isinstance(data, dict) and data.get("job_id"):
+00320|             return {
+00321|                 "ok": True,
+00322|                 "job_id": data["job_id"],
+00323|                 "seed": (data.get("seeds") or [None])[0],
+00324|                 "resolved_prompt": data.get("resolved_prompt", ""),
+00325|             }
+00326|         detail = (
+00327|             data.get("error") if isinstance(data, dict) else None
+00328|         ) or f"HTTP {status_code}: {str(data)[:120]}"
+00329|         return {"ok": False, "detail": str(detail)[:200]}
+00330|     except Exception as exc:  # noqa: BLE001
+00331|         return {"ok": False, "detail": f"genmedia unreachable ({_short(exc)})"}
+00332| 
+00333| 
+00334| def genmedia_job(job_id: str) -> dict | None:
+00335|     """One GET /api/job/{id}. Verified job dict: {"id", "tool", "status",
+00336|     "error", "outputs": [{"path", "url", "name"}, ...], "step",
+00337|     "total_steps", "eta_s", ...}. Status values seen in app.py: queued |
+00338|     running | done | error (image jobs; also scheduled/cancelling/paused/
+00339|     downloading elsewhere). Terminal pair for renders: done | error; the
+00340|     output FILESYSTEM path is outputs[0].path.
+00341|     Returns a normalized {"id","status","error","outputs":[paths],"step",
+00342|     "total_steps"} or None when the pillar is unreachable/404 — NEVER raises."""
+00343|     try:
+00344|         status_code, data = http_json(
+00345|             "GET", BASES["genmedia"] + "/api/job/" + urllib.parse.quote(job_id)
+00346|         )
+00347|         if status_code == 200 and isinstance(data, dict):
+00348|             outputs = [
+00349|                 o.get("path") for o in (data.get("outputs") or []) if o.get("path")
+00350|             ]
+00351|             return {
+00352|                 "id": data.get("id", job_id),
+00353|                 "status": data.get("status", "unknown"),
+00354|                 "error": data.get("error"),
+00355|                 "outputs": outputs,
+00356|                 "step": data.get("step", 0),
+00357|                 "total_steps": data.get("total_steps", 0),
+00358|             }
+00359|         return None
+00360|     except Exception:  # noqa: BLE001
+00361|         return None
+00362| 
+00363| 
+00364| def genmedia_compose(
+00365|     slugs: list,
+00366|     scene: str,
+00367|     style: str = "",
+00368|     content_tier: str = "sfw",
+00369|     seed: str = "",
+00370| ) -> dict:
+00371|     """Identity-locked multi-character merge via POST /api/characters/merge
+00372|     (FORM: slugs, scene, style, seed, content_tier; engine qwen_edit — the
+00373|     only engine that consumes the characters' actual ref images). Requires
+00374|     2+ slugs with ref sheets; returns {"job_id": str}. HTTP compose EXISTS
+00375|     (it mirrors the MCP compose_characters tool).
+00376|     Returns {"ok": True, "job_id": str} or {"ok": False, "detail"} — NEVER
+00377|     raises."""
+00378|     if not slugs or len(slugs) < 2:
+00379|         return {
+00380|             "ok": False,
+00381|             "detail": "compose needs at least two characters (qwen_edit merge)",
+00382|         }
+00383|     form = {
+00384|         "slugs": ",".join(s.strip() for s in slugs if s.strip()),
+00385|         "scene": scene or "",
+00386|         "style": style or "",
+00387|         "seed": str(seed) if seed not in (None, "") else "",
+00388|         "content_tier": content_tier or "sfw",
+00389|         "model": "qwen_edit",
+00390|     }
+00391|     try:
+00392|         status_code, data = http_json(
+00393|             "POST", BASES["genmedia"] + "/api/characters/merge", form=form
+00394|         )
+00395|         if status_code == 200 and isinstance(data, dict) and data.get("job_id"):
+00396|             return {"ok": True, "job_id": data["job_id"]}
+00397|         detail = (
+00398|             data.get("detail") or data.get("error") if isinstance(data, dict) else None
+00399|         ) or f"HTTP {status_code}: {str(data)[:120]}"
+00400|         return {"ok": False, "detail": str(detail)[:200]}
+00401|     except Exception as exc:  # noqa: BLE001
+00402|         return {"ok": False, "detail": f"genmedia unreachable ({_short(exc)})"}
+00403| 
+00404| 
+00405| # --------------------------------------------------------------------------
+00406| # archon (CANON)
+00407| # --------------------------------------------------------------------------
+00408| 
+00409| 
+00410| def archon_list_sandboxes() -> list | None:
+00411|     """All active sandboxes, or None when the pillar is down."""
+00412|     try:
+00413|         status_code, data = http_json("GET", BASES["archon"] + "/api/sandboxes")
+00414|         if status_code == 200 and isinstance(data, list):
+00415|             return data
+00416|         return None
+00417|     except Exception:  # noqa: BLE001
+00418|         return None
+00419| 
+00420| 
+00421| def _archon_cli_create(name: str) -> dict:
+00422|     """CLI fallback: python -m knowledge_core sandboxes create NAME
+00423|     (verified to exist in Knowledge_systems/python/knowledge_core/cli.py).
+00424|     15s timeout, never raises."""
+00425|     env = dict(os.environ)
+00426|     py_root = str(ARCHON_REPO / "python")
+00427|     env["PYTHONPATH"] = py_root + (
+00428|         os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
+00429|     )
+00430|     try:
+00431|         proc = subprocess.run(
+00432|             [sys.executable, "-m", "knowledge_core", "sandboxes", "create", name],
+00433|             capture_output=True,
+00434|             text=True,
+00435|             timeout=15,
+00436|             env=env,
+00437|             cwd=py_root,
+00438|         )
+00439|         if proc.returncode == 0:
+00440|             return {"ok": True, "sandbox": None, "detail": proc.stdout.strip()[:200]}
+00441|         return {
+00442|             "ok": False,
+00443|             "sandbox": None,
+00444|             "detail": f"archon CLI failed (rc={proc.returncode}): "
+00445|             f"{(proc.stderr or proc.stdout).strip()[:120]}",
+00446|         }
+00447|     except Exception as exc:  # noqa: BLE001
+00448|         return {
+00449|             "ok": False,
+00450|             "sandbox": None,
+00451|             "detail": f"archon CLI error ({_short(exc)})",
+00452|         }
+00453| 
+00454| 
+00455| def archon_create_sandbox(name: str) -> dict:
+00456|     """Create an archon sandbox. HTTP first (POST /api/sandboxes JSON
+00457|     {"name": ...} — inspected shape); CLI fallback only when HTTP is
+00458|     unreachable. Returns {"ok": bool, "sandbox": dict|None, "detail": str};
+00459|     never raises."""
+00460|     url = BASES["archon"] + "/api/sandboxes"
+00461|     try:
+00462|         status_code, data = http_json("POST", url, json_body={"name": name})
+00463|         if status_code in (200, 201) and isinstance(data, dict):
+00464|             return {
+00465|                 "ok": True,
+00466|                 "sandbox": data,
+00467|                 "detail": f"created sandbox {data.get('id')}",
+00468|             }
+00469|         if status_code == 400:
+00470|             return {
+00471|                 "ok": False,
+00472|                 "sandbox": None,
+00473|                 "detail": f"archon 400: {str(data)[:120]}",
+00474|             }
+00475|         # Other HTTP errors: fall through to the CLI fallback, it may still work.
+00476|     except Exception:  # noqa: BLE001 — unreachable -> CLI fallback
+00477|         pass
+00478|     result = _archon_cli_create(name)
+00479|     if result["ok"]:
+00480|         result["detail"] = f"created via CLI: {result['detail']}"
+00481|     return result
+00482| 
+00483| 
+00484| def archon_ask(
+00485|     question: str,
+00486|     sandbox_id: str | None = None,
+00487|     libraries: list | None = None,
+00488|     top_k: int = 6,
+00489|     timeout: tuple = (3.0, 30.0),
+00490| ) -> dict:
+00491|     """Canon grounding: POST /api/ask (inspected shape 2026-09-06):
+00492|     {"question": str, "sandbox_id"?: str, "libraries"?: [str], "top_k"?: int}
+00493|     -> {"answer": str, "citations": [...], "libraries_searched": [...],
+00494|         "backend": str, "found": bool, ...}.
+00495| 
+00496|     Returns {"ok": True, "answer", "citations", "backend", "found"} on a
+00497|     usable answer; {"ok": False, "detail"} when archon is down/unhappy.
+00498|     Never raises — story drafting degrades to ungrounded when this fails."""
+00499|     body = {"question": question, "top_k": top_k}
+00500|     if sandbox_id:
+00501|         body["sandbox_id"] = sandbox_id
+00502|     if libraries:
+00503|         body["libraries"] = libraries
+00504|     try:
+00505|         status_code, data = http_json(
+00506|             "POST", BASES["archon"] + "/api/ask", json_body=body, timeout=timeout
+00507|         )
+00508|     except Exception as exc:  # noqa: BLE001 — pillar-down is data, not a crash
+00509|         return {"ok": False, "detail": f"archon unreachable ({_short(exc)})"}
+00510|     if status_code == 200 and isinstance(data, dict):
+00511|         answer = (data.get("answer") or "").strip()
+00512|         if answer:
+00513|             return {
+00514|                 "ok": True,
+00515|                 "answer": answer,
+00516|                 "citations": data.get("citations") or [],
+00517|                 "backend": data.get("backend"),
+00518|                 "found": bool(data.get("found")),
+00519|             }
+00520|         return {"ok": False, "detail": "archon returned an empty answer"}
+00521|     return {"ok": False, "detail": f"archon {status_code}: {str(data)[:120]}"}
+00522| 
+00523| 
+00524| # --------------------------------------------------------------------------
+00525| # RunPod (elastic overflow — dormant until RUNPOD_API_KEY exists)
+00526| # --------------------------------------------------------------------------
+00527| 
+00528| 
+00529| def runpod_zimage(
+00530|     prompt: str,
+00531|     size: str = "1024*1024",
+00532|     seed: int = -1,
+00533|     image_url: str | None = None,
+00534|     out_dir=None,
+00535|     timeout: tuple = (10.0, 120.0),
+00536| ) -> dict:
+00537|     """Managed Z-Image Turbo on RunPod Public Endpoints — the platform's
+00538|     image OVERFLOW path (local renders first; this serves when the rig is
+00539|     busy or away). Confirmed shape (2026-09-09):
+00540|     POST https://api.runpod.ai/v2/z-image-turbo/runsync
+00541|     {input: {prompt, image?, size, seed}} -> {output: {image_url, cost}};
+00542|     image URLs EXPIRE IN 7 DAYS — we download immediately.
+00543| 
+00544|     {"ok": True, "path", "cost", "execution_ms"} on success;
+00545|     {"ok": False, "detail"} when dormant (no key) or unhappy. Never raises."""
+00546|     key = os.environ.get("RUNPOD_API_KEY", "")
+00547|     if not key:
+00548|         return {
+00549|             "ok": False,
+00550|             "detail": "runpod dormant (no RUNPOD_API_KEY) — local renders only",
+00551|         }
+00552|     payload = {"input": {"prompt": prompt, "size": size, "seed": seed}}
+00553|     if image_url:
+00554|         payload["input"]["image"] = image_url
+00555|     try:
+00556|         status_code, data = http_json(
+00557|             "POST",
+00558|             "https://api.runpod.ai/v2/z-image-turbo/runsync",
+00559|             json_body=payload,
+00560|             headers={"authorization": f"Bearer {key}"},
+00561|             timeout=timeout,
+00562|         )
+00563|     except Exception as exc:  # noqa: BLE001 — overflow is best-effort
+00564|         return {"ok": False, "detail": f"runpod unreachable ({_short(exc)})"}
+00565|     if status_code != 200 or not isinstance(data, dict):
+00566|         return {"ok": False, "detail": f"runpod {status_code}: {str(data)[:120]}"}
+00567|     out = data.get("output") or {}
+00568|     url = out.get("image_url")
+00569|     if data.get("status") != "COMPLETED" or not url:
+00570|         return {
+00571|             "ok": False,
+00572|             "detail": f"runpod job {data.get('status')}: {str(data)[:120]}",
+00573|         }
+00574|     dest_dir = Path(out_dir) if out_dir else (records.store_root() / "runpod_cache")
+00575|     dest_dir.mkdir(parents=True, exist_ok=True)
+00576|     dest = dest_dir / f"zimg_{int(time.time() * 1000):x}.png"
+00577|     try:
+00578|         req = urllib.request.Request(url, headers={"user-agent": "goetica/0.1"})
+00579|         with urllib.request.urlopen(req, timeout=timeout[1]) as resp:
+00580|             dest.write_bytes(resp.read())
+00581|     except Exception as exc:  # noqa: BLE001
+00582|         return {"ok": False, "detail": f"image download failed ({_short(exc)})"}
+00583|     from . import meter  # local import avoids a cycle at module load
+00584| 
+00585|     meter.record(
+00586|         "image",
+00587|         out.get("cost") or 0.005,
+00588|         {"estimated": out.get("cost") is None, "engine": "z-image-turbo"},
+00589|     )
+00590|     return {
+00591|         "ok": True,
+00592|         "path": str(dest),
+00593|         "cost": out.get("cost"),
+00594|         "execution_ms": data.get("executionTime"),
+00595|     }
+00596| 
+00597| 
+00598| # --------------------------------------------------------------------------
+00599| # ollama (SOUL/PEN)
+00600| # --------------------------------------------------------------------------
+00601| 
+00602| 
+00603| def ollama_tags() -> list:
+00604|     """Installed model tags (GET /api/tags). [] when ollama is down or the
+00605|     response is malformed — callers that need liveness use status()."""
+00606|     try:
+00607|         status_code, data = http_json("GET", BASES["ollama"] + "/api/tags")
+00608|         if status_code == 200 and isinstance(data, dict):
+00609|             return [m.get("name") for m in data.get("models", []) if m.get("name")]
+00610|     except Exception:  # noqa: BLE001
+00611|         pass
+00612|     return []
+00613| 
+00614| 
+00615| def ollama_ps() -> list:
+00616|     """Currently-resident models (GET /api/ps) — [{name, size_vram, ...}].
+00617|     [] when ollama is down. The shell's model dropdown marks resident tags
+00618|     (swap to them is instant); never a 500."""
+00619|     try:
+00620|         status_code, data = http_json("GET", BASES["ollama"] + "/api/ps")
+00621|         if status_code == 200 and isinstance(data, dict):
+00622|             models = data.get("models", [])
+00623|             return [m for m in models if isinstance(m, dict)]
+00624|     except Exception:  # noqa: BLE001
+00625|         pass
+00626|     return []
+00627| 
+00628| 
+00629| def ollama_chat(model: str, system: str, messages: list, timeout: float = 120.0) -> str:
+00630|     """One chat completion (POST /api/chat, stream=false). `system` is
+00631|     prepended as a system message (the persona card). num_ctx 8192 and
+00632|     keep_alive 10m per contract. Returns the reply text.
+00633|     Raises PillarError on any failure (web turns this into a 503)."""
+00634|     full = ([{"role": "system", "content": system}] if system else []) + list(messages)
+00635|     payload = {
+00636|         "model": model,
+00637|         "messages": full,
+00638|         "stream": False,
+00639|         "options": {"num_ctx": 8192},
+00640|         "keep_alive": "10m",
+00641|     }
+00642|     try:
+00643|         status_code, data = http_json(
+00644|             "POST",
+00645|             BASES["ollama"] + "/api/chat",
+00646|             json_body=payload,
+00647|             timeout=(5.0, float(timeout)),
+00648|         )
+00649|     except Exception as exc:  # noqa: BLE001
+00650|         raise PillarError(f"ollama unreachable ({_short(exc)})") from exc
+00651|     if status_code != 200 or not isinstance(data, dict):
+00652|         raise PillarError(f"ollama error (HTTP {status_code}): {str(data)[:160]}")
+00653|     content = (data.get("message") or {}).get("content")
+00654|     if not isinstance(content, str):
+00655|         raise PillarError(f"ollama returned no message.content: {str(data)[:160]}")
+00656|     return content
+00657| 
+00658| 
+00659| def ollama_chat_stream(model: str, system: str, messages: list, timeout: float = 240.0):
+00660|     """Streaming chat completion (POST /api/chat, stream=true) — same hygiene
+00661|     as ollama_chat (num_ctx 8192, keep_alive 10m, system prepended).
+00662| 
+00663|     Generator: yields {"delta": "<chunk>"} as tokens arrive, then a final
+00664|     {"stats": {...}} (prompt_eval_count/eval_count/done_reason when ollama
+00665|     reports them). Raises PillarError on connect/protocol failure BEFORE the
+00666|     first delta; a torn stream mid-reply ends with whatever stats arrived —
+00667|     callers keep the text they already received (honest partial output beats
+00668|     a lost reply)."""
+00669|     full = ([{"role": "system", "content": system}] if system else []) + list(messages)
+00670|     payload = {
+00671|         "model": model,
+00672|         "messages": full,
+00673|         "stream": True,
+00674|         "options": {"num_ctx": 8192},
+00675|         "keep_alive": "10m",
+00676|     }
+00677|     req = urllib.request.Request(
+00678|         BASES["ollama"] + "/api/chat",
+00679|         data=json.dumps(payload).encode("utf-8"),
+00680|         headers={"Content-Type": "application/json"},
+00681|         method="POST",
+00682|     )
+00683|     try:
+00684|         resp = urllib.request.urlopen(req, timeout=float(timeout))
+00685|     except Exception as exc:  # noqa: BLE001
+00686|         raise PillarError(f"ollama unreachable ({_short(exc)})") from exc
+00687|     try:
+00688|         if resp.status != 200:
+00689|             raise PillarError(f"ollama error (HTTP {resp.status})")
+00690|         buf = ""
+00691|         stats = {}
+00692|         while True:
+00693|             chunk = resp.read(8192)
+00694|             if not chunk:
+00695|                 break
+00696|             buf += chunk.decode("utf-8", errors="replace")
+00697|             while "\n" in buf:
+00698|                 line, buf = buf.split("\n", 1)
+00699|                 line = line.strip()
+00700|                 if not line:
+00701|                     continue
+00702|                 try:
+00703|                     ev = json.loads(line)
+00704|                 except ValueError:
+00705|                     continue  # keepalive junk — never kill a live stream
+00706|                 if not isinstance(ev, dict):
+00707|                     continue
+00708|                 if ev.get("error"):
+00709|                     raise PillarError(f"ollama stream error: {str(ev['error'])[:160]}")
+00710|                 text = (ev.get("message") or {}).get("content")
+00711|                 if ev.get("done"):
+00712|                     stats = {
+00713|                         k: ev.get(k)
+00714|                         for k in ("prompt_eval_count", "eval_count", "done_reason")
+00715|                         if ev.get(k) is not None
+00716|                     }
+00717|                     yield {"stats": stats}
+00718|                     return
+00719|                 if isinstance(text, str) and text:
+00720|                     yield {"delta": text}
+00721|         # stream ended without a done line — yield whatever stats we have
+00722|         yield {"stats": stats}
+00723|     finally:
+00724|         try:
+00725|             resp.close()
+00726|         except Exception:  # noqa: BLE001
+00727|             pass
+00728| 
+00729| 
+00730| # --------------------------------------------------------------------------
+00731| # ai_audio (VOICE) — F5-TTS clone jobs + voice profiles
+00732| #
+00733| # Verified shapes (ai_audio/ui/app.py, inspected 2026-09-06):
+00734| #   POST /api/voice/clone  FORM (or multipart when a file is attached):
+00735| #       gen_text (required), ref_text="", nfe_step=32, speed=1.0, seed=-1,
+00736| #       voice_id="", name="", ref_audio=<file>  — exactly one of
+00737| #       voice_id | ref_audio. Returns {"ok": true, "job_id": "<hex12>"}.
+00738| #   GET  /api/jobs/{id}    -> {"ok": true, "job": {id, kind, status
+00739| #       (queued|running|done|error|cancelled|waiting), params{gen_text,...},
+00740| #       result{url, duration_s, elapsed_s, rtf}, error, progress, eta_s}}
+00741| #       — result.url is pillar-relative, e.g. "/outputs/voice_clone/x.wav",
+00742| #       served by the /outputs static mount.
+00743| #   GET  /api/voices       -> {"ok": true, "voices": [{id, name, created,
+00744| #       ref_text, notes, thumb_url, ref_url}]}
+00745| #   POST /api/voices       FORM/multipart: name (required), ref_audio (file,
+00746| #       required), ref_text, notes, thumbnail -> {"ok": true, "voice": {...}}
+00747| #       SYNCHRONOUS (saves ref.wav + voice.json; no job).
+00748| # --------------------------------------------------------------------------
+00749| 
+00750| 
+00751| def multipart_encode(fields: dict, files: list) -> tuple:
+00752|     """Encode (fields: {name: str}, files: [(name, filename, bytes, ctype)])
+00753|     as multipart/form-data. Returns (body_bytes, content_type_header)."""
+00754|     boundary = "----tulpa" + uuid.uuid4().hex
+00755|     buf = io.BytesIO()
+00756|     for key, val in fields.items():
+00757|         if val is None:
+00758|             continue
+00759|         buf.write(
+00760|             f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"'
+00761|             f"\r\n\r\n{val}\r\n".encode("utf-8")
+00762|         )
+00763|     for name, filename, blob, ctype in files:
+00764|         buf.write(
+00765|             f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; '
+00766|             f'filename="{filename}"\r\nContent-Type: {ctype}\r\n\r\n'.encode("utf-8")
+00767|         )
+00768|         buf.write(blob)
+00769|         buf.write(b"\r\n")
+00770|     buf.write(f"--{boundary}--\r\n".encode("utf-8"))
+00771|     return buf.getvalue(), f"multipart/form-data; boundary={boundary}"
+00772| 
+00773| 
+00774| def _http_post_body(url: str, body: bytes, content_type: str, timeout=TTS_TIMEOUT):
+00775|     """POST raw bytes with a chosen content type -> (status, parsed_body)."""
+00776|     req = urllib.request.Request(
+00777|         url,
+00778|         data=body,
+00779|         headers={"Accept": "application/json", "Content-Type": content_type},
+00780|         method="POST",
+00781|     )
+00782|     with urllib.request.urlopen(req, timeout=max(timeout)) as resp:
+00783|         raw = resp.read()
+00784|         status = resp.status
+00785|     try:
+00786|         parsed = json.loads(raw.decode("utf-8")) if raw else None
+00787|     except (json.JSONDecodeError, UnicodeDecodeError):
+00788|         parsed = raw.decode("utf-8", "replace")
+00789|     return status, parsed
+00790| 
+00791| 
+00792| def _fetch_file(url: str, dest_dir: Path, timeout=TTS_FETCH_TIMEOUT) -> Path:
+00793|     """GET url -> dest_dir/<url basename>. Raises on any failure."""
+00794|     name = os.path.basename(urllib.parse.urlparse(url).path) or "audio.wav"
+00795|     req = urllib.request.Request(url, headers={"Accept": "*/*"})
+00796|     with urllib.request.urlopen(req, timeout=max(timeout)) as resp:
+00797|         blob = resp.read()
+00798|     dest_dir.mkdir(parents=True, exist_ok=True)
+00799|     dest = dest_dir / name
+00800|     dest.write_bytes(blob)
+00801|     return dest
+00802| 
+00803| 
+00804| def _is_connection_failure(exc: Exception) -> bool:
+00805|     """True when the pillar was unreachable (down/timeout), as opposed to
+00806|     answering with an HTTP error. Used to flag results {"down": True}."""
+00807|     return isinstance(exc, (urllib.error.URLError, TimeoutError, OSError)) and not (
+00808|         isinstance(exc, urllib.error.HTTPError)
+00809|     )
+00810| 
+00811| 
+00812| def ai_audio_list_voices() -> dict:
+00813|     """GET /api/voices. {"ok": True, "voices": [...]} when up;
+00814|     {"ok": False, "voices": None, "down": bool, "detail": str} otherwise."""
+00815|     try:
+00816|         status_code, data = http_json("GET", BASES["ai_audio"] + "/api/voices")
+00817|         if (
+00818|             status_code == 200
+00819|             and isinstance(data, dict)
+00820|             and isinstance(data.get("voices"), list)
+00821|         ):
+00822|             return {"ok": True, "voices": data["voices"], "detail": "ok"}
+00823|         return {
+00824|             "ok": False,
+00825|             "voices": None,
+00826|             "down": False,
+00827|             "detail": f"ai_audio refused (HTTP {status_code}): {str(data)[:120]}",
+00828|         }
+00829|     except Exception as exc:  # noqa: BLE001
+00830|         return {
+00831|             "ok": False,
+00832|             "voices": None,
+00833|             "down": _is_connection_failure(exc),
+00834|             "detail": f"ai_audio unreachable ({_short(exc)})",
+00835|         }
+00836| 
+00837| 
+00838| def ai_audio_create_voice(
+00839|     name: str, ref_audio_path: str, ref_text: str = "", notes: str = ""
+00840| ) -> dict:
+00841|     """POST /api/voices (synchronous profile creation: ref.wav + voice.json).
+00842|     Returns {"ok": True, "voice": {...}} or {"ok": False, "down": bool,
+00843|     "detail": str}. The created voice id is result["voice"]["id"]."""
+00844|     try:
+00845|         blob = Path(ref_audio_path).expanduser().read_bytes()
+00846|     except OSError as exc:
+00847|         return {"ok": False, "down": False, "detail": f"cannot read ref audio: {exc}"}
+00848|     body, ctype = multipart_encode(
+00849|         {"name": name, "ref_text": ref_text or "", "notes": notes or ""},
+00850|         [("ref_audio", Path(ref_audio_path).name, blob, "audio/wav")],
+00851|     )
+00852|     try:
+00853|         status_code, data = _http_post_body(
+00854|             BASES["ai_audio"] + "/api/voices", body, ctype
+00855|         )
+00856|         if status_code in (200, 201) and isinstance(data, dict) and data.get("voice"):
+00857|             return {"ok": True, "voice": data["voice"], "detail": "created"}
+00858|         return {
+00859|             "ok": False,
+00860|             "down": False,
+00861|             "detail": f"ai_audio refused (HTTP {status_code}): {str(data)[:120]}",
+00862|         }
+00863|     except Exception as exc:  # noqa: BLE001
+00864|         return {
+00865|             "ok": False,
+00866|             "down": _is_connection_failure(exc),
+00867|             "detail": f"ai_audio unreachable ({_short(exc)})",
+00868|         }
+00869| 
+00870| 
+00871| def ai_audio_clone_job(
+00872|     gen_text: str,
+00873|     voice_id: str | None = None,
+00874|     ref_audio_path: str | None = None,
+00875|     ref_text: str = "",
+00876|     speed: float = 1.0,
+00877| ) -> dict:
+00878|     """POST /api/voice/clone — submit an async F5-TTS job. Exactly one of
+00879|     voice_id | ref_audio_path. Returns {"ok": True, "job_id": str} or
+00880|     {"ok": False, "down": bool, "detail": str}."""
+00881|     if bool(voice_id) == bool(ref_audio_path):
+00882|         return {
+00883|             "ok": False,
+00884|             "down": False,
+00885|             "detail": "exactly one of voice_id | ref_audio_path is required",
+00886|         }
+00887|     try:
+00888|         url = BASES["ai_audio"] + "/api/voice/clone"
+00889|         if ref_audio_path:
+00890|             blob = Path(ref_audio_path).expanduser().read_bytes()
+00891|             body, ctype = multipart_encode(
+00892|                 {"gen_text": gen_text, "ref_text": ref_text or "", "speed": speed},
+00893|                 [("ref_audio", Path(ref_audio_path).name, blob, "audio/wav")],
+00894|             )
+00895|             status_code, data = _http_post_body(url, body, ctype)
+00896|         else:
+00897|             status_code, data = http_json(
+00898|                 "POST",
+00899|                 url,
+00900|                 form={
+00901|                     "gen_text": gen_text,
+00902|                     "ref_text": ref_text or "",
+00903|                     "speed": speed,
+00904|                     "voice_id": voice_id or "",
+00905|                 },
+00906|             )
+00907|         if status_code in (200, 201) and isinstance(data, dict) and data.get("job_id"):
+00908|             return {"ok": True, "job_id": data["job_id"], "detail": "submitted"}
+00909|         return {
+00910|             "ok": False,
+00911|             "down": False,
+00912|             "detail": f"ai_audio refused (HTTP {status_code}): {str(data)[:120]}",
+00913|         }
+00914|     except Exception as exc:  # noqa: BLE001
+00915|         return {
+00916|             "ok": False,
+00917|             "down": _is_connection_failure(exc),
+00918|             "detail": f"ai_audio unreachable ({_short(exc)})",
+00919|         }
+00920| 
+00921| 
+00922| def ai_audio_job(job_id: str) -> dict:
+00923|     """GET /api/jobs/{id}. {"ok": True, "job": {...}} | {"ok": False, ...}."""
+00924|     try:
+00925|         status_code, data = http_json(
+00926|             "GET",
+00927|             BASES["ai_audio"] + "/api/jobs/" + urllib.parse.quote(str(job_id)),
+00928|             timeout=TTS_TIMEOUT,
+00929|         )
+00930|         if status_code == 200 and isinstance(data, dict) and data.get("job"):
+00931|             return {"ok": True, "job": data["job"], "detail": "ok"}
+00932|         return {
+00933|             "ok": False,
+00934|             "down": False,
+00935|             "detail": f"ai_audio refused (HTTP {status_code}): {str(data)[:120]}",
+00936|         }
+00937|     except Exception as exc:  # noqa: BLE001
+00938|         return {
+00939|             "ok": False,
+00940|             "down": _is_connection_failure(exc),
+00941|             "detail": f"ai_audio unreachable ({_short(exc)})",
+00942|         }
+00943| 
+00944| 
+00945| def ai_audio_fetch_output(job: dict, dest_dir: Path) -> dict:
+00946|     """Download a DONE job's wav into dest_dir. The job dict is the one from
+00947|     ai_audio_job()["job"]; its result.url is pillar-relative
+00948|     (/outputs/voice_clone/<f>.wav). Returns {"ok": True, "path": str} or
+00949|     {"ok": False, "down": bool, "detail": str}."""
+00950|     result = (job or {}).get("result") or {}
+00951|     url = result.get("url") if isinstance(result, dict) else None
+00952|     if not url:
+00953|         return {"ok": False, "down": False, "detail": "job has no result.url"}
+00954|     if url.startswith("http://") or url.startswith("https://"):
+00955|         full = url
+00956|     else:
+00957|         full = BASES["ai_audio"] + url
+00958|     try:
+00959|         path = _fetch_file(full, Path(dest_dir))
+00960|         return {"ok": True, "path": str(path), "detail": "ok"}
+00961|     except Exception as exc:  # noqa: BLE001
+00962|         return {
+00963|             "ok": False,
+00964|             "down": _is_connection_failure(exc),
+00965|             "detail": f"ai_audio output fetch failed ({_short(exc)})",
+00966|         }
+00967| 
+00968| 
+00969| # --------------------------------------------------------------------------
+00970| # genmedia (VOICE, kokoro leg) — preset TTS is SYNCHRONOUS over there
+00971| #
+00972| # Verified shapes (local_image_video/ui/app.py, inspected 2026-09-06):
+00973| #   GET  /api/tts/voices   -> {voices: [kokoro preset ids], count,
+00974| #                             kokoro_available, clone_available}
+00975| #   POST /api/tts/synthesize FORM: text, voice_mode="preset", preset_voice,
+00976| #        character_slug -> {ok, path, name, url: "/speech_audio/.../<f>.wav",
+00977| #        duration, mode, engine, voice, speed}. Sync; kokoro ~1-2s CPU.
+00978| #        The wav is served at :8931<url>.
+00979| # --------------------------------------------------------------------------
+00980| 
+00981| 
+00982| def genmedia_tts_voices() -> dict:
+00983|     """Kokoro preset list from genmedia. {"ok": True, "voices": [...]} or
+00984|     {"ok": False, "down": bool, "detail": str}."""
+00985|     try:
+00986|         status_code, data = http_json("GET", BASES["genmedia"] + "/api/tts/voices")
+00987|         if (
+00988|             status_code == 200
+00989|             and isinstance(data, dict)
+00990|             and isinstance(data.get("voices"), list)
+00991|         ):
+00992|             return {"ok": True, "voices": data["voices"], "detail": "ok"}
+00993|         return {
+00994|             "ok": False,
+00995|             "down": False,
+00996|             "detail": f"genmedia refused (HTTP {status_code}): {str(data)[:120]}",
+00997|         }
+00998|     except Exception as exc:  # noqa: BLE001
+00999|         return {
+01000|             "ok": False,
+01001|             "down": _is_connection_failure(exc),
+01002|             "detail": f"genmedia unreachable ({_short(exc)})",
+01003|         }
+01004| 
+01005| 
+01006| def genmedia_speak_kokoro(text: str, preset_voice: str) -> dict:
+01007|     """POST /api/tts/synthesize with an explicit kokoro preset. Returns
+01008|     {"ok": True, "url": str, "name": str, ...} or {"ok": False, "down": bool,
+01009|     "detail": str}. Dedicated timeout: genmedia runs kokoro in a 60s-bounded
+01010|     subprocess (cold model load can exceed 10s — measured 10.2s first call)."""
+01011|     try:
+01012|         status_code, data = http_json(
+01013|             "POST",
+01014|             BASES["genmedia"] + "/api/tts/synthesize",
+01015|             form={"text": text, "voice_mode": "preset", "preset_voice": preset_voice},
+01016|             timeout=(5.0, 70.0),
+01017|         )
+01018|         if status_code == 200 and isinstance(data, dict) and data.get("ok"):
+01019|             data.setdefault("down", False)
+01020|             return data
+01021|         detail = (
+01022|             data.get("error") if isinstance(data, dict) else None
+01023|         ) or f"genmedia refused (HTTP {status_code}): {str(data)[:120]}"
+01024|         return {"ok": False, "down": False, "detail": str(detail)}
+01025|     except Exception as exc:  # noqa: BLE001
+01026|         return {
+01027|             "ok": False,
+01028|             "down": _is_connection_failure(exc),
+01029|             "detail": f"genmedia unreachable ({_short(exc)})",
+01030|         }
+01031| 
+01032| 
+01033| def genmedia_fetch_audio(url: str, dest_dir: Path) -> dict:
+01034|     """Download a genmedia-served wav (pillar-relative url) into dest_dir.
+01035|     Returns {"ok": True, "path": str} or {"ok": False, ...}."""
+01036|     if url.startswith("http://") or url.startswith("https://"):
+01037|         full = url
+01038|     else:
+01039|         full = BASES["genmedia"] + url
+01040|     try:
+01041|         path = _fetch_file(full, Path(dest_dir))
+01042|         return {"ok": True, "path": str(path), "detail": "ok"}
+01043|     except Exception as exc:  # noqa: BLE001
+01044|         return {
+01045|             "ok": False,
+01046|             "down": _is_connection_failure(exc),
+01047|             "detail": f"genmedia audio fetch failed ({_short(exc)})",
+01048|         }
+01049| 
+
+(End of file - total 1049 lines)
+</file>

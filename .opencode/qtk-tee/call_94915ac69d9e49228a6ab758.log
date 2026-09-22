@@ -1,0 +1,392 @@
+<file>
+00001| /**
+00002|  * Tab panes: Timeline, Analysis, Story (dossier + brief, md-rendered).
+00003|  */
+00004| import { api } from './api';
+00005| import {
+00006|   clear, copyText, downloadText, emptyState, fmtTs, guarded, h, toast, truncate,
+00007| } from './dom';
+00008| import { pivotToTask } from './inspector';
+00009| import { etypeColor } from './graph';
+00010| import { renderMarkdownInto } from './md';
+00011| import type { Case, CaseGraph, Entity, Task, TimelineEvent } from './types';
+00012| 
+00013| // ------------------------------------------------------------- TIMELINE
+00014| 
+00015| export class TimelinePane {
+00016|   readonly el: HTMLElement;
+00017|   private listEl: HTMLElement;
+00018|   private caseId: string | null = null;
+00019| 
+00020|   constructor(private readonly cb: {
+00021|     caseId(): string | null;
+00022|     entities(): Entity[];
+00023|     navigate(entityId: string): void;
+00024|   }) {
+00025|     this.listEl = h('div', { class: 'timeline-list' });
+00026|     const kindSel = h('select', { class: 'input input-sm', 'aria-label': 'event kind' }) as HTMLSelectElement;
+00027|     for (const k of ['scan', 'note', 'sighting', 'enrichment', 'research', 'report', 'manual']) {
+00028|       kindSel.append(h('option', { value: k }, k));
+00029|     }
+00030|     const titleIn = h('input', {
+00031|       class: 'input input-sm', type: 'text', placeholder: 'event title…', spellcheck: 'false',
+00032|     }) as HTMLInputElement;
+00033|     const entitySel = h('select', { class: 'input input-sm', 'aria-label': 'linked entity (optional)' }) as HTMLSelectElement;
+00034|     entitySel.append(h('option', { value: '' }, '— entity —'));
+00035|     const srcIn = h('input', {
+00036|       class: 'input input-sm', type: 'text', placeholder: 'source (optional)', spellcheck: 'false',
+00037|     }) as HTMLInputElement;
+00038| 
+00039|     const form = h('form', { class: 'row gap6 tl-form' }, kindSel, titleIn, entitySel, srcIn,
+00040|       h('button', { class: 'btn btn-sm btn-primary', type: 'submit' }, '+ event'));
+00041|     form.addEventListener('submit', (e) => {
+00042|       e.preventDefault();
+00043|       const cid = this.cb.caseId();
+00044|       const title = titleIn.value.trim();
+00045|       if (!cid) { toast('select a case first', 'warn'); return; }
+00046|       if (!title) { toast('event title required', 'warn'); return; }
+00047|       void guarded(api.addTimelineEvent(cid, {
+00048|         kind: kindSel.value,
+00049|         title,
+00050|         entity_id: entitySel.value || null,
+00051|         source: srcIn.value.trim() || undefined,
+00052|       }).then((ev) => {
+00053|         titleIn.value = '';
+00054|         void this.refresh(cid);
+00055|         return ev;
+00056|       }), 'event added');
+00057|     });
+00058| 
+00059|     this.el = h('section', { class: 'pane', id: 'pane-timeline', hidden: true },
+00060|       h('header', { class: 'pane-head' },
+00061|         h('span', { class: 'panel-label' }, 'timeline'),
+00062|         form,
+00063|       ),
+00064|       h('div', { class: 'pane-body' }, this.listEl),
+00065|     );
+00066|   }
+00067| 
+00068|   async refresh(caseId?: string | null): Promise<void> {
+00069|     const cid = caseId ?? this.cb.caseId();
+00070|     if (!cid) {
+00071|       clear(this.listEl);
+00072|       this.listEl.append(emptyState('no case selected', 'pick or create a case in the left rail'));
+00073|       return;
+00074|     }
+00075|     this.caseId = cid;
+00076|     let events: TimelineEvent[];
+00077|     try {
+00078|       events = await api.getTimeline(cid);
+00079|     } catch (e) {
+00080|       clear(this.listEl);
+00081|       this.listEl.append(h('div', { class: 'error-text small pad8' }, String(e instanceof Error ? e.message : e)));
+00082|       return;
+00083|     }
+00084|     // entity select options
+00085|     const sel = this.el.querySelector<HTMLSelectElement>('select[aria-label="linked entity (optional)"]');
+00086|     if (sel) {
+00087|       const cur = sel.value;
+00088|       clear(sel);
+00089|       sel.append(h('option', { value: '' }, '— entity —'));
+00090|       for (const en of this.cb.entities()) {
+00091|         sel.append(h('option', { value: en.id }, `${en.etype}:${truncate(en.label, 30)}`));
+00092|       }
+00093|       sel.value = cur;
+00094|     }
+00095| 
+00096|     clear(this.listEl);
+00097|     if (events.length === 0) {
+00098|       this.listEl.append(emptyState('no events yet', 'connector runs land here; add one manually above'));
+00099|       return;
+00100|     }
+00101|     for (const ev of events) this.listEl.append(this.eventRow(ev));
+00102|   }
+00103| 
+00104|   private eventRow(ev: TimelineEvent): HTMLElement {
+00105|     const entityLabel = ev.entity_id ? this.cb.entities().find((x) => x.id === ev.entity_id) : undefined;
+00106|     return h('div', { class: 'tl-item' },
+00107|       h('div', { class: 'tl-dot' }),
+00108|       h('div', { class: 'tl-body' },
+00109|         h('div', { class: 'row gap6' },
+00110|           h('span', { class: 'chip' }, ev.kind),
+00111|           h('span', { class: 'mono small muted' }, fmtTs(ev.ts)),
+00112|           ev.source ? h('span', { class: 'muted small' }, `· ${ev.source}`) : null,
+00113|         ),
+00114|         h('div', { class: 'tl-title' }, ev.title),
+00115|         entityLabel
+00116|           ? h('a', {
+00117|             class: 'tl-entity', href: '#', role: 'button',
+00118|             onclick: (e: Event) => { e.preventDefault(); this.cb.navigate(entityLabel.id); },
+00119|           },
+00120|             h('span', { class: 'dot dot-inline', style: `background:${etypeColor(String(entityLabel.etype))}` }),
+00121|             entityLabel.label)
+00122|           : null,
+00123|       ),
+00124|     );
+00125|   }
+00126| 
+00127|   currentCase(): string | null { return this.caseId; }
+00128| }
+00129| 
+00130| // ------------------------------------------------------------- ANALYSIS
+00131| 
+00132| export class AnalysisPane {
+00133|   readonly el: HTMLElement;
+00134|   private bodyEl: HTMLElement;
+00135|   private graph: CaseGraph | null = null;
+00136| 
+00137|   constructor(private readonly cb: {
+00138|     caseId(): string | null;
+00139|     entities(): Entity[];
+00140|     labelOf(id: string): string;
+00141|     navigate(entityId: string): void;
+00142|     taskStarted(task: Task): void;
+00143|   }) {
+00144|     this.bodyEl = h('div', { class: 'pane-body analysis-body' });
+00145|     this.el = h('section', { class: 'pane', id: 'pane-analysis', hidden: true },
+00146|       h('header', { class: 'pane-head' },
+00147|         h('span', { class: 'panel-label' }, 'analysis'),
+00148|         h('span', { class: 'muted small' }, 'pagerank · degree · communities · pivots'),
+00149|       ),
+00150|       this.bodyEl,
+00151|     );
+00152|   }
+00153| 
+00154|   refreshFromGraph(g: CaseGraph): void {
+00155|     this.graph = g;
+00156|     this.render();
+00157|   }
+00158| 
+00159|   private barGlyph(frac: number): string {
+00160|     const filled = Math.max(0, Math.min(10, Math.round(frac * 10)));
+00161|     return '▰'.repeat(filled) + '▱'.repeat(10 - filled);
+00162|   }
+00163| 
+00164|   private render(): void {
+00165|     const g = this.graph;
+00166|     clear(this.bodyEl);
+00167|     if (!g || g.nodes.length === 0) {
+00168|       this.bodyEl.append(emptyState('nothing to analyze yet', 'add entities and relations to the case'));
+00169|       return;
+00170|     }
+00171|     const ents = this.cb.entities();
+00172|     const labelOf = (id: string): string => ents.find((x) => x.id === id)?.label ?? this.cb.labelOf(id);
+00173|     const etypeOf = (id: string): string => String(ents.find((x) => x.id === id)?.etype ?? '');
+00174| 
+00175|     // ---- centrality ---------------------------------------------------
+00176|     const pr = g.analysis.pagerank ?? {};
+00177|     const deg = g.analysis.degree ?? {};
+00178|     const ranked = Object.entries(pr).sort((a, b) => b[1] - a[1]).slice(0, 15);
+00179|     const prMax = ranked[0]?.[1] ?? 1;
+00180|     const table = h('table', { class: 'data-table' },
+00181|       h('thead', {}, h('tr', {},
+00182|         h('th', {}, '#'), h('th', {}, 'entity'), h('th', {}, 'etype'),
+00183|         h('th', { class: 'num' }, 'deg'), h('th', { class: 'num' }, 'pagerank'), h('th', {}, '')),
+00184|       ),
+00185|     );
+00186|     const tbody = h('tbody');
+00187|     ranked.forEach(([id, score], i) => {
+00188|       tbody.append(h('tr', {},
+00189|         h('td', { class: 'mono muted' }, String(i + 1)),
+00190|         h('td', { class: 'mono' }, truncate(labelOf(id), 34)),
+00191|         h('td', {}, h('span', { class: 'chip', style: `border-color:${etypeColor(etypeOf(id))}55` }, etypeOf(id))),
+00192|         h('td', { class: 'num mono' }, String(deg[id] ?? 0)),
+00193|         h('td', { class: 'num mono' }, score.toFixed(4)),
+00194|         h('td', { class: 'bar-glyph mono' }, this.barGlyph(prMax > 0 ? score / prMax : 0)),
+00195|       ));
+00196|     });
+00197|     table.append(tbody);
+00198| 
+00199|     // ---- communities --------------------------------------------------
+00200|     const comm = g.analysis.communities ?? {};
+00201|     const groups = new Map<string, string[]>();
+00202|     for (const [id, cidv] of Object.entries(comm)) {
+00203|       const key = String(cidv);
+00204|       const arr = groups.get(key) ?? [];
+00205|       arr.push(id);
+00206|       groups.set(key, arr);
+00207|     }
+00208|     const comps = g.analysis.components ?? [];
+00209|     const commEl = h('div', { class: 'comm-wrap' },
+00210|       h('div', { class: 'muted small' },
+00211|         `${comps.length} connected component${comps.length === 1 ? '' : 's'} (${comps.map((c) => c.length).join(', ')})`),
+00212|       ...(groups.size === 0
+00213|         ? [h('div', { class: 'muted small pad6' }, 'no communities computed')]
+00214|         : [...groups.entries()]
+00215|           .sort((a, b) => b[1].length - a[1].length)
+00216|           .map(([cid, ids]) => h('div', { class: 'comm-group' },
+00217|             h('div', { class: 'panel-label' }, `community ${cid} · ${ids.length}`),
+00218|             h('div', { class: 'comm-members' },
+00219|               ...ids.map((id) => h('span', {
+00220|                 class: 'chip chip-node', title: id,
+00221|                 onclick: () => this.cb.navigate(id),
+00222|               },
+00223|               h('span', { class: 'dot dot-inline', style: `background:${etypeColor(etypeOf(id))}` }),
+00224|               truncate(labelOf(id), 26)))),
+00225|           ))),
+00226|     );
+00227| 
+00228|     // ---- pivots ---------------------------------------------------------
+00229|     const pivotsBox = h('div', { class: 'pivots-box' });
+00230|     const sel = h('select', { class: 'input input-sm', 'aria-label': 'pivot entity' }) as HTMLSelectElement;
+00231|     const pivotEntities = [...ents].sort((a, b) => (pr[b.id] ?? 0) - (pr[a.id] ?? 0)).slice(0, 15);
+00232|     for (const e of pivotEntities) sel.append(h('option', { value: e.id }, `${e.etype}:${truncate(e.label, 26)}`));
+00233|     const pivotList = h('div', { class: 'pivots-wrap open' });
+00234|     const loadPivots = (): void => {
+00235|       const cid = this.cb.caseId();
+00236|       const eid = sel.value;
+00237|       if (!cid || !eid) return;
+00238|       clear(pivotList);
+00239|       pivotList.append(h('div', { class: 'muted small pad6' }, 'loading…'));
+00240|       void guarded(api.getPivots(cid, eid).then(({ pivots }) => {
+00241|         clear(pivotList);
+00242|         const ent = ents.find((x) => x.id === eid);
+00243|         if (!ent) return;
+00244|         if (pivots.length === 0) pivotList.append(h('div', { class: 'muted small pad6' }, 'no pivot suggestions for this entity'));
+00245|         for (const p of pivots) pivotList.append(this.pivotCard(p, ent, cid));
+00246|         return pivots;
+00247|       }));
+00248|     };
+00249|     sel.addEventListener('change', loadPivots);
+00250|     pivotsBox.append(
+00251|       h('div', { class: 'row gap6' }, sel,
+00252|         h('button', { class: 'btn btn-sm', type: 'button', onclick: loadPivots }, '↻')),
+00253|       pivotList,
+00254|     );
+00255| 
+00256|     this.bodyEl.append(
+00257|       h('div', { class: 'analysis-grid' },
+00258|         h('div', { class: 'panel panel-sub' },
+00259|           h('header', { class: 'panel-head' }, h('span', { class: 'panel-label' }, 'centrality · top 15 pagerank')),
+00260|           h('div', { class: 'table-scroll' }, table),
+00261|         ),
+00262|         h('div', { class: 'stack' },
+00263|           h('div', { class: 'panel panel-sub' },
+00264|             h('header', { class: 'panel-head' }, h('span', { class: 'panel-label' }, 'communities')),
+00265|             commEl,
+00266|           ),
+00267|           h('div', { class: 'panel panel-sub' },
+00268|             h('header', { class: 'panel-head' }, h('span', { class: 'panel-label' }, 'pivot suggestions')),
+00269|             pivotsBox,
+00270|           ),
+00271|         ),
+00272|       ),
+00273|     );
+00274|     loadPivots();
+00275|   }
+00276| 
+00277|   private pivotCard(p: { entity_id: string; action: string; reason: string; priority: number }, ent: Entity, caseId: string): HTMLElement {
+00278|     return h('div', { class: 'pivot-card' },
+00279|       h('div', { class: 'row gap6' },
+00280|         h('span', { class: 'chip chip-action mono' }, p.action),
+00281|         h('span', { class: 'pivot-priority mono', title: `priority ${p.priority.toFixed(2)}` }, p.priority.toFixed(2)),
+00282|       ),
+00283|       h('div', { class: 'pivot-reason muted small' }, p.reason),
+00284|       h('button', {
+00285|         class: 'btn btn-sm btn-primary', type: 'button',
+00286|         onclick: () => {
+00287|           const { kind, params } = pivotToTask(p.action, ent);
+00288|           void guarded(api.createTask(caseId, { kind, target: ent.id, params }).then((t) => {
+00289|             this.cb.taskStarted(t);
+00290|             return t;
+00291|           }), `${kind} queued from pivot`);
+00292|         },
+00293|       }, 'run'),
+00294|     );
+00295|   }
+00296| }
+00297| 
+00298| // ---------------------------------------------------------------- STORY
+00299| 
+00300| export class StoryPane {
+00301|   readonly el: HTMLElement;
+00302|   private dossierEl: HTMLElement;
+00303|   private briefEl: HTMLElement;
+00304|   private dossierSrc = '';
+00305|   private briefSrc = '';
+00306| 
+00307|   constructor(private readonly cb: { caseId(): string | null; case(): Case | null }) {
+00308|     this.dossierEl = h('div', { class: 'md' });
+00309|     this.briefEl = h('div', { class: 'md' });
+00310| 
+00311|     const pushBtn = h('button', {
+00312|       class: 'btn btn-sm', type: 'button', title: 'POST /api/archon/push_case',
+00313|       onclick: () => {
+00314|         const cid = this.cb.caseId();
+00315|         if (!cid) return;
+00316|         void guarded(api.archonPushCase({ case_id: cid }).then((r) => {
+00317|           const name = r.sandbox && typeof r.sandbox === 'object' && 'name' in r.sandbox
+00318|             ? String((r.sandbox as Record<string, unknown>).name) : 'sandbox';
+00319|           return `pushed to archon: ${name}`;
+00320|         }), undefined);
+00321|       },
+00322|     }, '⇪ push case to archon');
+00323| 
+00324|     this.el = h('section', { class: 'pane', id: 'pane-story', hidden: true },
+00325|       h('header', { class: 'pane-head' },
+00326|         h('span', { class: 'panel-label' }, 'story'),
+00327|         h('span', { class: 'flex-spacer' }),
+00328|         pushBtn,
+00329|       ),
+00330|       h('div', { class: 'pane-body story-body' },
+00331|         this.docPanel('dossier', this.dossierEl, () => this.dossierSrc, 'dossier'),
+00332|         this.docPanel('article brief', this.briefEl, () => this.briefSrc, 'brief'),
+00333|       ),
+00334|     );
+00335|   }
+00336| 
+00337|   private docPanel(title: string, into: HTMLElement, src: () => string, fileTag: string): HTMLElement {
+00338|     return h('div', { class: 'panel panel-sub story-panel' },
+00339|       h('header', { class: 'panel-head' },
+00340|         h('span', { class: 'panel-label' }, title),
+00341|         h('span', { class: 'flex-spacer' }),
+00342|         h('button', {
+00343|           class: 'btn btn-ghost btn-sm', type: 'button', title: 'copy markdown',
+00344|           onclick: () => {
+00345|             void copyText(src()).then((ok) => toast(ok ? `${title} copied` : 'copy failed', ok ? 'ok' : 'error'));
+00346|           },
+00347|         }, '⧉ copy'),
+00348|         h('button', {
+00349|           class: 'btn btn-ghost btn-sm', type: 'button', title: 'download .md',
+00350|           onclick: () => {
+00351|             const c = this.cb.case();
+00352|             downloadText(`${c?.slug ?? 'case'}-${fileTag}.md`, src());
+00353|           },
+00354|         }, '⭳ .md'),
+00355|       ),
+00356|       h('div', { class: 'story-scroll' }, into),
+00357|     );
+00358|   }
+00359| 
+00360|   async refresh(caseId?: string | null): Promise<void> {
+00361|     const cid = caseId ?? this.cb.caseId();
+00362|     if (!cid) {
+00363|       this.dossierEl.innerHTML = '';
+00364|       this.briefEl.innerHTML = '';
+00365|       this.dossierEl.append(emptyState('no case selected'));
+00366|       this.briefEl.append(emptyState('no case selected'));
+00367|       return;
+00368|     }
+00369|     const [dossier, brief] = await Promise.allSettled([
+00370|       api.dossierMd(cid), api.briefMd(cid),
+00371|     ]);
+00372|     if (dossier.status === 'fulfilled') {
+00373|       this.dossierSrc = dossier.value;
+00374|       renderMarkdownInto(this.dossierEl, dossier.value);
+00375|     } else {
+00376|       this.dossierSrc = '';
+00377|       renderMarkdownInto(this.dossierEl, `> dossier unavailable: ${dossier.reason}`);
+00378|     }
+00379|     if (brief.status === 'fulfilled') {
+00380|       this.briefSrc = brief.value;
+00381|       renderMarkdownInto(this.briefEl, brief.value);
+00382|     } else {
+00383|       this.briefSrc = '';
+00384|       renderMarkdownInto(this.briefEl, `> brief unavailable: ${brief.reason}`);
+00385|     }
+00386|   }
+00387| }
+00388| 
+
+(End of file - total 388 lines)
+</file>

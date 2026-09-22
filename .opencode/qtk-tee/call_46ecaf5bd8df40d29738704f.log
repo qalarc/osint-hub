@@ -1,0 +1,132 @@
+Found 100 matches
+/home/fivelidz/projects/GLM_projects/investigation/public_repos/audit_clones/armsmith-robot-arms/research/external/SpatialClaw/tools/third_party/sam3/scripts/eval/silver/inaturalist_image_subset.json:
+  Line 115:   "101416.jpg": "Reptilia/Drymarchon melanurus erebennus/7a3a093d23f74b9910bf71892bb9eb5e.jpg",
+  Line 116:   "101418.jpg": "Reptilia/Drymarchon melanurus erebennus/07c773974b94f9e90fda9a4da505a9b5.jpg",
+  Line 117:   "101426.jpg": "Reptilia/Drymarchon melanurus erebennus/d1aa6cdb18da8c25975c8f0ca76a149d.jpg",
+  Line 118:   "101430.jpg": "Reptilia/Drymarchon melanurus erebennus/d557255c87a701000b77c7d836b38586.jpg",
+  Line 119:   "101433.jpg": "Reptilia/Drymarchon melanurus erebennus/1382c84539869244d6bb43a4545ab629.jpg",
+  Line 30546:   "444758.jpg": "Reptilia/Drymarchon melanurus/cb7a7d53e8c3dba47b57bb3ec29990f7.jpg",
+  Line 32141:   "475825.jpg": "Reptilia/Drymarchon melanurus erebennus/5d3e02ff40da4f6fe1471e3f1640c003.jpg",
+  Line 32142:   "475837.jpg": "Reptilia/Drymarchon melanurus erebennus/232f6e3133d96a6d1affc80373a6925d.jpg",
+  Line 34684:   "51615.jpg": "Reptilia/Drymarchon melanurus/65cd97c90b46a816cb15dfeea1f50df0.jpg",
+  Line 34686:   "51628.jpg": "Reptilia/Drymarchon melanurus/363e6da9ce8acec906dc81b32e59c20d.jpg",
+  Line 34687:   "51629.jpg": "Reptilia/Drymarchon melanurus/9a43cb336c92999bef84502eb37392dd.jpg",
+  Line 34688:   "51630.jpg": "Reptilia/Drymarchon melanurus/f15cbcbafd3935b06195738d04c54be5.jpg",
+  Line 34691:   "51631.jpg": "Reptilia/Drymarchon melanurus/b2065fb81bac4faad395debfcdd8513a.jpg",
+  Line 34692:   "51635.jpg": "Reptilia/Drymarchon melanurus/fd1b68fe76e2b401b0074f7750905284.jpg",
+
+/home/fivelidz/projects/GLM_projects/tulpa_platform/tulpas/_archived_import_tests/tk-2-run2/manifest.json:
+  Line 28:     "archon_sandbox": null
+
+/home/fivelidz/projects/GLM_projects/tulpa_platform/tulpa_core/web.py:
+  Line 97:     # tags, archon sandboxes. A down pillar degrades to [] + detail, never 500.
+  Line 312:     # index it in canon/archon_refs.json, then (sandbox bound + archon up)
+  Line 1143:     # canon sandboxes (archon)
+  Line 1146:         sbs = pillars.archon_list_sandboxes()
+  Line 1148:             detail["canon_sandboxes"] = "archon down (sandboxes unverifiable)"
+  Line 1200:         sbs = pillars.archon_list_sandboxes()
+  Line 1202:             pillars.archon_id_matches(value, sb) if isinstance(sb, dict) else False
+  Line 1205:             return f"canon_sandbox {value!r} not found in archon (pillar is up)"
+  Line 1253:         sbs = pillars.archon_list_sandboxes()
+  Line 1258:                 if isinstance(sb, dict) and pillars.archon_id_matches(value, sb)
+  Line 1262:         patch = {"archon_sandbox": value}
+  Line 1264:             patch["archon_sandbox_id"] = hit.get("id")
+  Line 1269:                 "detail": f"canon.archon_sandbox = {hit.get('library_id') or value}",
+  Line 1275:             "detail": f"canon.archon_sandbox = {value} (archon down, unverified)",
+  Line 1327:     sandbox = (manifest.get("canon") or {}).get("archon_sandbox_id") or (
+  Line 1329:     ).get("archon_sandbox")
+
+/home/fivelidz/projects/GLM_projects/tulpa_platform/tulpas/_archived_import_tests/tk-4/manifest.json:
+  Line 28:     "archon_sandbox": null
+
+/home/fivelidz/projects/GLM_projects/tulpa_platform/tulpa_core/records.py:
+  Line 17:     |-- canon/archon_refs.json
+  Line 115:     "canon": {"archon_refs.json": '{\n  "refs": []\n}\n'},
+  Line 142:         "canon": {"archon_sandbox": None},
+  Line 323:     return char_dir(slug) / "canon" / "archon_refs.json"
+  Line 350:     canon/archon_refs.json. Returns the index row {file, title, t}.
+  Line 388:     """Index rows from canon/archon_refs.json, newest (appended) last is
+
+/home/fivelidz/projects/GLM_projects/tulpa_platform/tulpas/_archived_import_tests/tk-3/manifest.json:
+  Line 28:     "archon_sandbox": null
+
+/home/fivelidz/projects/GLM_projects/tulpa_platform/tulpas/_archived_import_tests/tk-2/manifest.json:
+  Line 28:     "archon_sandbox": null
+
+/home/fivelidz/projects/GLM_projects/investigation/ash_pc/staging/apply_setup.sh:
+  Line 101:     if grep -q "/home/fivelidz" "$u" 2>/dev/null || grep -qE "gmux|qal-|diary|aria-|chanalyse|tradez|concierge|glm-chat|herald|lms-studio|oom-notify|archon-keep|seo-watchdog|cachyos-backup" <<<"$name"; then
+
+/home/fivelidz/projects/GLM_projects/tulpa_platform/tulpas/tk/manifest.json:
+  Line 28:     "archon_sandbox": null
+
+/home/fivelidz/projects/GLM_projects/tulpa_platform/docs/WORKBOARD.md:
+  Line 71: - [ ] P1 · alex · decision: Archon as systemd user service (`archon-web.service`) — currently started ad hoc by sessions (STRATEGY queue #4, recommended yes)
+
+/home/fivelidz/projects/GLM_projects/tulpa_platform/app/ui/app.js:
+  Line 303:   { key: "archon", name: "archon", role: "canon" },
+  Line 771: function archonUp() { return pillarUp("archon") !== false; }
+  Line 994:   const up = archonUp();
+  Line 995:   const body = [pKV("archon sandbox", c.archon_sandbox)];
+  Line 997:     ? h("a", { class: "p-link", href: "http://127.0.0.1:7843", target: "_blank", rel: "noreferrer" }, h("span", { html: ICONS.ext, class: "p-link-ico" }), "open archon :7843")
+  Line 998:     : h("div", { class: "p-empty" }, "archon is down — sandbox link disabled. The record keeps the sandbox name; nothing is lost."));
+  Line 1179:   const cur = m.canon?.archon_sandbox || "";
+  Line 1189:     class: "mini", "data-tip": "canon.archon_sandbox (knowledge lives in archon)",
+  Line 1191:       if (!sel.value) { toast("Pick an archon sandbox first.", { timeout: 2500 }); return; }
+  Line 1201:     class: "mini", "data-tip": "appends canon/entries/<ts>_<title>.md + ingests into archon",
+  Line 1212:         const ingNote = ing.ok ? "ingested into archon"
+  Line 1213:           : ing.pending ? "saved; ingest pending (archon down)"
+
+/home/fivelidz/projects/GLM_projects/tulpa_platform/docs/WIKI.md:
+  Line 160:   *open genmedia :8931*, *ai_audio :8932*, *open archon :7843* — or use the tauri app
+  Line 162:   tulpa_studio, genmedia, ai_audio, archon, personaplex, voice_terminal, app_hub,
+  Line 207: ├── canon/ archon_refs.json (+ entries via the API)
+
+/home/fivelidz/projects/GLM_projects/tulpa_platform/tulpa_core/pillars.py:
+  Line 5: hub :8769 are up; ai_audio :8932 and archon :7843 may be down. Every function
+  Line 15:   archon    POST /api/sandboxes       JSON {"name": str} -> sandbox dict
+  Line 44:     "archon": "http://127.0.0.1:7843",
+  Line 91: def archon_normalize_id(value: str) -> str:
+  Line 92:     """Collapse an archon sandbox name/library_id to a comparable token.
+  Line 110: def archon_id_matches(desired: str, fields: dict) -> bool:
+  Line 115:             val == desired or archon_normalize_id(val) == archon_normalize_id(desired)
+  Line 146:     """{ollama, genmedia, ai_audio, archon, hub} each {"up": bool, "detail": str}."""
+  Line 161:     "archon": "/api/sandboxes",
+  Line 406: # archon (CANON)
+  Line 410: def archon_list_sandboxes() -> list | None:
+  Line 413:         status_code, data = http_json("GET", BASES["archon"] + "/api/sandboxes")
+  Line 421: def _archon_cli_create(name: str) -> dict:
+  Line 444:             "detail": f"archon CLI failed (rc={proc.returncode}): "
+  Line 451:             "detail": f"archon CLI error ({_short(exc)})",
+  Line 455: def archon_create_sandbox(name: str) -> dict:
+  Line 456:     """Create an archon sandbox. HTTP first (POST /api/sandboxes JSON
+  Line 460:     url = BASES["archon"] + "/api/sandboxes"
+  Line 473:                 "detail": f"archon 400: {str(data)[:120]}",
+  Line 478:     result = _archon_cli_create(name)
+  Line 484: def archon_ask(
+  Line 497:     usable answer; {"ok": False, "detail"} when archon is down/unhappy.
+  Line 506:             "POST", BASES["archon"] + "/api/ask", json_body=body, timeout=timeout
+  Line 509:         return {"ok": False, "detail": f"archon unreachable ({_short(exc)})"}
+  Line 520:         return {"ok": False, "detail": "archon returned an empty answer"}
+  Line 521:     return {"ok": False, "detail": f"archon {status_code}: {str(data)[:120]}"}
+
+/home/fivelidz/projects/GLM_projects/tulpa_platform/tests/test_story_draft.py:
+  Line 56:             return {"ok": False, "detail": "archon unreachable (test)"}
+  Line 63:             {"canon": {"archon_sandbox": canon_sandbox}} if canon_sandbox else {},
+  Line 100:     def test_draft_degrades_when_archon_down(self):
+  Line 108:         self.assertIn("archon unreachable", g[0]["detail"])
+  Line 162:     def test_grounding_resolves_real_archon_sandbox_id(self):
+  Line 181:         with mock.patch.object(pillars_mod, "archon_list_sandboxes", list_sandboxes):
+  Line 194:         # archon answers 200-with-prose for lookup failures — the sentinel
+  Line 202:                 "Use `archon sandboxes list` to see available sandboxes.",
+  Line 212:         self.assertIn("not found in archon", g["detail"])
+  Line 253:         # pillars.archon_ask) — no ollama, no :7843.
+  Line 256:             mock.patch.object(pillars_mod, "archon_ask", self._ask()),
+
+/home/fivelidz/projects/GLM_projects/tulpa_platform/tests/test_diary.py:
+  Line 86:     def test_to_canon_archon_down_is_pending(self):
+  Line 88:             "mei", {"canon": {"archon_sandbox": "project.character.mei"}}
+  Line 90:         self.assertTrue(manifest["canon"]["archon_sandbox"])
+  Line 92:             diary.pillars, "status", lambda: {"archon": {"up": False}}
+  Line 99:         records.update("mei", {"canon": {"archon_sandbox": "sbx_1"}})
+
+(Results are truncated. Consider using a more specific path or pattern.)

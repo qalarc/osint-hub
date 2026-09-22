@@ -196,6 +196,19 @@ class JobsManager:
                 status=res["status"],
             )
             job.persist()
+        # post-scan Jev grading (Laya osint-grading dataset) — optional, never fatal
+        if os.environ.get("OSINT_GRADE", "1") != "0":
+            try:
+                import grading
+
+                grading.grade_job(job)
+            except Exception as exc:  # noqa: BLE001
+                job.emit(
+                    "log",
+                    tool="grader",
+                    qtype=None,
+                    line=f"[hub] grading skipped: {type(exc).__name__}: {exc}",
+                )
         job.status = (
             "error" if all(r["status"] == "error" for r in job.results) else "done"
         )

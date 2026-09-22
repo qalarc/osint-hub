@@ -1,0 +1,254 @@
+<file>
+00001| /**
+00002|  * Left rail: cases list, connectors health, tasks mini-feed, add-entity form.
+00003|  */
+00004| import { api } from './api';
+00005| import { clear, emptyState, h, guarded, timeAgo, toast } from './dom';
+00006| import { ETYPES, type Case, type Entity, type Health, type Task } from './types';
+00007| 
+00008| export interface RailCallbacks {
+00009|   selectCase(id: string): void;
+00010|   selectEntity(id: string): void;
+00011|   caseChanged(): void;
+00012|   graphDirty(): void;
+00013|   tasksChanged(): void;
+00014|   currentCaseId(): string | null;
+00015|   currentEntities(): Entity[];
+00016| }
+00017| 
+00018| const STATUS_DOT: Record<string, string> = {
+00019|   active: 'dot dot-up',
+00020|   paused: 'dot dot-warn',
+00021|   archived: 'dot dot-off',
+00022|   closed: 'dot dot-off',
+00023| };
+00024| 
+00025| export class Rail {
+00026|   readonly el: HTMLElement;
+00027|   private casesList: HTMLElement;
+00028|   private healthList: HTMLElement;
+00029|   private tasksList: HTMLElement;
+00030|   private entityForm: HTMLFormElement;
+00031|   private etypeSelect: HTMLSelectElement;
+00032|   private labelInput: HTMLInputElement;
+00033|   private activeId: string | null = null;
+00034|   private cases: Case[] = [];
+00035| 
+00036|   constructor(private readonly cb: RailCallbacks) {
+00037|     this.el = h('aside', { class: 'rail rail-left', id: 'rail-left' });
+00038| 
+00039|     // ---- cases -------------------------------------------------------
+00040|     this.casesList = h('div', { class: 'cases-list', role: 'list' });
+00041|     const newName = h('input', {
+00042|       class: 'input input-sm', type: 'text', placeholder: 'new case name…',
+00043|       spellcheck: 'false', 'aria-label': 'new case name',
+00044|     }) as HTMLInputElement;
+00045|     const newForm = h('form', { class: 'row gap6 new-case-row' },
+00046|       newName,
+00047|       h('button', { class: 'btn btn-sm btn-primary', type: 'submit', title: 'create case' }, '+'),
+00048|     );
+00049|     newForm.addEventListener('submit', (e) => {
+00050|       e.preventDefault();
+00051|       const name = newName.value.trim();
+00052|       if (!name) return;
+00053|       newName.value = '';
+00054|       void guarded(api.createCase({ name }), (c) => {
+00055|         void this.refreshCases(c.id);
+00056|         return `case created: ${c.name}`;
+00057|       });
+00058|     });
+00059| 
+00060|     this.el.append(
+00061|       h('section', { class: 'panel panel-rail' },
+00062|         h('header', { class: 'panel-head' }, h('span', { class: 'panel-label' }, 'cases')),
+00063|         newForm,
+00064|         this.casesList,
+00065|       ),
+00066|     );
+00067| 
+00068|     // ---- connectors ----------------------------------------------------
+00069|     this.healthList = h('div', { class: 'health-list' });
+00070|     this.el.append(
+00071|       h('section', { class: 'panel panel-rail' },
+00072|         h('header', { class: 'panel-head' },
+00073|           h('span', { class: 'panel-label' }, 'connectors'),
+00074|           h('button', {
+00075|             class: 'btn btn-ghost btn-sm', type: 'button', title: 'refresh health',
+00076|             onclick: () => void this.refreshHealth(),
+00077|           }, '↻'),
+00078|         ),
+00079|         this.healthList,
+00080|       ),
+00081|     );
+00082| 
+00083|     // ---- tasks mini-feed -------------------------------------------------
+00084|     this.tasksList = h('div', { class: 'minitasks' });
+00085|     this.el.append(
+00086|       h('section', { class: 'panel panel-rail' },
+00087|         h('header', { class: 'panel-head' }, h('span', { class: 'panel-label' }, 'tasks')),
+00088|         this.tasksList,
+00089|       ),
+00090|     );
+00091| 
+00092|     // ---- add entity ------------------------------------------------------
+00093|     this.etypeSelect = h('select', { class: 'input input-sm', 'aria-label': 'entity type' }) as HTMLSelectElement;
+00094|     for (const t of ETYPES) {
+00095|       this.etypeSelect.append(h('option', { value: t }, t));
+00096|     }
+00097|     this.etypeSelect.value = 'username';
+00098|     this.labelInput = h('input', {
+00099|       class: 'input input-sm', type: 'text', placeholder: 'label…',
+00100|       spellcheck: 'false', 'aria-label': 'entity label',
+00101|     }) as HTMLInputElement;
+00102|     this.entityForm = h('form', { class: 'add-entity-form' },
+00103|       this.etypeSelect,
+00104|       this.labelInput,
+00105|       h('button', { class: 'btn btn-sm btn-primary btn-block', type: 'submit' }, '+ entity'),
+00106|     ) as HTMLFormElement;
+00107|     this.entityForm.addEventListener('submit', (e) => {
+00108|       e.preventDefault();
+00109|       this.submitEntity();
+00110|     });
+00111|     this.el.append(
+00112|       h('section', { class: 'panel panel-rail' },
+00113|         h('header', { class: 'panel-head' }, h('span', { class: 'panel-label' }, 'add entity')),
+00114|         this.entityForm,
+00115|       ),
+00116|     );
+00117|   }
+00118| 
+00119|   get isOpen(): boolean { return true; }
+00120| 
+00121|   get activeCaseId(): string | null { return this.activeId; }
+00122| 
+00123|   private submitEntity(): void {
+00124|     const caseId = this.cb.currentCaseId();
+00125|     const label = this.labelInput.value.trim();
+00126|     if (!caseId) { toast('select a case first', 'warn'); return; }
+00127|     if (!label) { toast('label required', 'warn'); return; }
+00128|     const etype = this.etypeSelect.value;
+00129|     this.labelInput.value = '';
+00130|     void guarded(api.addEntity(caseId, { etype, label }), (r) =>
+00131|       r.deduplicated ? `"${label}" merged with existing entity` : `entity added: ${label}`);
+00132|   }
+00133| 
+00134|   async refreshCases(selectId?: string): Promise<void> {
+00135|     const cases = await api.listCases();
+00136|     this.cases = cases;
+00137|     if (selectId) this.activeId = selectId;
+00138|     else if (!cases.some((c) => c.id === this.activeId)) {
+00139|       this.activeId = cases[0]?.id ?? null;
+00140|     }
+00141|     this.renderCases();
+00142|     const target = this.activeId;
+00143|     if (selectId && target === selectId) this.cb.selectCase(target);
+00144|   }
+00145| 
+00146|   setActive(id: string | null): void {
+00147|     this.activeId = id;
+00148|     this.renderCases();
+00149|   }
+00150| 
+00151|   private renderCases(): void {
+00152|     clear(this.casesList);
+00153|     if (this.cases.length === 0) {
+00154|       this.casesList.append(emptyState('no cases', 'create one above to begin'));
+00155|       return;
+00156|     }
+00157|     for (const c of this.cases) {
+00158|       const row = h('div', {
+00159|         class: `case-row${c.id === this.activeId ? ' active' : ''}`,
+00160|         role: 'listitem', tabindex: '0',
+00161|         onclick: () => this.cb.selectCase(c.id),
+00162|         onkeydown: (e: KeyboardEvent) => { if (e.key === 'Enter') this.cb.selectCase(c.id); },
+00163|       },
+00164|         h('span', { class: STATUS_DOT[c.status] ?? 'dot dot-off', title: c.status }),
+00165|         h('span', { class: 'case-name', title: c.name }, c.name),
+00166|         h('span', { class: 'case-updated' }, timeAgo(c.updated_at)),
+00167|         h('button', {
+00168|           class: 'btn btn-ghost btn-xs case-del', type: 'button', title: 'delete case',
+00169|           onclick: (e: Event) => {
+00170|             e.stopPropagation();
+00171|             if (!window.confirm(`Delete case "${c.name}" and all its data?`)) return;
+00172|             void guarded(api.deleteCase(c.id), () => {
+00173|               void this.refreshCases();
+00174|               this.cb.caseChanged();
+00175|               return 'case deleted';
+00176|             });
+00177|           },
+00178|         }, '✕'),
+00179|       );
+00180|       this.casesList.append(row);
+00181|     }
+00182|   }
+00183| 
+00184|   async refreshHealth(): Promise<void> {
+00185|     let health: Health;
+00186|     try {
+00187|       health = await api.health();
+00188|     } catch {
+00189|       this.renderHealth(null);
+00190|       return;
+00191|     }
+00192|     this.renderHealth(health);
+00193|   }
+00194| 
+00195|   private renderHealth(health: Health | null): void {
+00196|     clear(this.healthList);
+00197|     const connectors: Array<[string, string]> = health
+00198|       ? Object.entries(health.connectors)
+00199|       : ['hub', 'flowsint', 'openplanter', 'archon', 'laya'].map((k) => [k, 'down']);
+00200|     for (const [name, state] of connectors) {
+00201|       const cls = state === 'up' ? 'dot-up' : state === 'down' ? 'dot-down' : 'dot-off';
+00202|       this.healthList.append(
+00203|         h('div', {
+00204|           class: 'health-row', title: `${name}: ${state}`,
+00205|         },
+00206|           h('span', { class: `dot ${cls}` }),
+00207|           h('span', { class: 'health-name' }, name),
+00208|           h('span', { class: `health-state state-${state}` }, state),
+00209|         ),
+00210|       );
+00211|     }
+00212|   }
+00213| 
+00214|   refreshTasks(tasks: Task[]): void {
+00215|     clear(this.tasksList);
+00216|     const last = tasks.slice(0, 5);
+00217|     if (last.length === 0) {
+00218|       this.tasksList.append(h('div', { class: 'muted small pad6' }, 'no tasks yet — run one from the inspector'));
+00219|       return;
+00220|     }
+00221|     for (const t of last) {
+00222|       const row = h('div', {
+00223|         class: `minitask st-${t.status}`, tabindex: '0',
+00224|         title: `${t.kind} — ${t.status}${t.summary ? ` (${t.summary})` : ''}`,
+00225|         onclick: () => this.cb.tasksChanged(),
+00226|         onkeydown: (e: KeyboardEvent) => { if (e.key === 'Enter') this.cb.tasksChanged(); },
+00227|       },
+00228|         h('span', { class: 'dot' }, ),
+00229|         h('span', { class: 'minitask-kind' }, t.kind),
+00230|         h('span', { class: 'minitarget' }, t.target ? this.shortTarget(t.target) : ''),
+00231|       );
+00232|       this.tasksList.append(row);
+00233|     }
+00234|   }
+00235| 
+00236|   private shortTarget(id: string): string {
+00237|     const e = this.cb.currentEntities().find((x) => x.id === id);
+00238|     return e ? e.label : id;
+00239|   }
+00240| 
+00241|   focusEntityForm(): void {
+00242|     this.labelInput.focus();
+00243|   }
+00244| 
+00245|   prefillEntity(etype: string, label: string): void {
+00246|     if ((ETYPES as readonly string[]).includes(etype)) this.etypeSelect.value = etype;
+00247|     this.labelInput.value = label;
+00248|   }
+00249| }
+00250| 
+
+(End of file - total 250 lines)
+</file>

@@ -1,0 +1,27 @@
+[package]
+name = "nexus-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Nexus HTTP API + connector engine (qalarc hub, flowsint, openplanter, archon, laya)"
+
+[dependencies]
+nexus-core = { path = "../nexus-core" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+regex.workspace = true
+tokio.workspace = true
+axum = { version = "0.7", features = ["macros"] }
+tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip"] }
+tokio-stream = { version = "0.1", features = ["sync", "time"] }
+futures = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"

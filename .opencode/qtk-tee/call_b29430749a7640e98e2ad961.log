@@ -1,0 +1,285 @@
+<file>
+00001| """Job manager: runs scanner tools in worker threads, streams parsed events,
+00002| persists job state to data/jobs/*.json."""
+00003| 
+00004| from __future__ import annotations
+00005| 
+00006| import collections
+00007| import json
+00008| import os
+00009| import re
+00010| import secrets
+00011| import subprocess
+00012| import threading
+00013| import time
+00014| from concurrent.futures import ThreadPoolExecutor
+00015| from pathlib import Path
+00016| 
+00017| from tools import TOOLS, resolve_exe, strip_ansi
+00018| 
+00019| JOBS_DIR = Path(__file__).resolve().parent.parent / "data" / "jobs"
+00020| JOBS_DIR.mkdir(parents=True, exist_ok=True)
+00021| 
+00022| MAX_EVENTS = 5000  # in-memory event cap per job
+00023| MAX_JOBS_KEPT = 200  # prune persisted job files beyond this
+00024| TOOL_HARD_TIMEOUT = int(os.environ.get("OSINT_HUB_TOOL_TIMEOUT", "900"))  # seconds
+00025| 
+00026| 
+00027| class RateLimiter:
+00028|     """Sliding-window limiter, spec 'N/hour' or 'N/minute'."""
+00029| 
+00030|     WINDOWS = {"hour": 3600, "minute": 60, "second": 1}
+00031| 
+00032|     def __init__(self, spec: str):
+00033|         m = re.match(r"^(\d+)\s*/\s*(hour|minute|second)$", spec.strip().lower())
+00034|         if not m:
+00035|             raise ValueError(f"bad rate limit spec: {spec!r} (expected e.g. '20/hour')")
+00036|         self.limit, self.window = int(m.group(1)), self.WINDOWS[m.group(2)]
+00037|         self._hits: dict[str, collections.deque] = {}
+00038|         self._lock = threading.Lock()
+00039| 
+00040|     def allow(self, key: str) -> tuple[bool, int]:
+00041|         now = time.time()
+00042|         with self._lock:
+00043|             dq = self._hits.setdefault(key, collections.deque())
+00044|             while dq and dq[0] <= now - self.window:
+00045|                 dq.popleft()
+00046|             if len(dq) >= self.limit:
+00047|                 retry = int(self.window - (now - dq[0])) + 1
+00048|                 return False, retry
+00049|             dq.append(now)
+00050|             return True, 0
+00051| 
+00052| 
+00053| class Job:
+00054|     def __init__(
+00055|         self, type_: str, value: "str | dict", tools: list[str], options: dict
+00056|     ):
+00057|         self.id = "j_" + secrets.token_hex(4)
+00058|         self.type = type_
+00059|         self.value = value
+00060|         self.tools = tools
+00061|         self.options = options or {}
+00062|         # queries: [(qtype, qvalue)] — "multi" jobs fan out to one run per (query, tool)
+00063|         if type_ == "multi" and isinstance(value, dict):
+00064|             self.queries = [
+00065|                 (k, str(value[k]).strip())
+00066|                 for k in ("username", "phone", "email", "image")
+00067|                 if value.get(k)
+00068|             ]
+00069|         else:
+00070|             self.queries = [(type_, str(value).strip())]
+00071|         self.status = "queued"
+00072|         self.created_at = time.time()
+00073|         self.started_at: float | None = None
+00074|         self.finished_at: float | None = None
+00075|         self.error: str | None = None
+00076|         self.results = [
+00077|             {
+00078|                 "tool": t,
+00079|                 "qtype": qt,
+00080|                 "qvalue": qv,
+00081|                 "status": "pending",
+00082|                 "found": [],
+00083|                 "info": [],
+00084|                 "error": None,
+00085|             }
+00086|             for (qt, qv) in self.queries
+00087|             for t in tools
+00088|             if TOOLS.get(t, {}).get("kind") == qt
+00089|         ]
+00090|         self.events: list[dict] = []
+00091|         self.lock = threading.Lock()
+00092| 
+00093|     # -- events ------------------------------------------------------------
+00094|     def emit(self, event: str, **data) -> None:
+00095|         with self.lock:
+00096|             self.events.append({"event": event, "ts": round(time.time(), 3), **data})
+00097|             if len(self.events) > MAX_EVENTS:
+00098|                 del self.events[: len(self.events) - MAX_EVENTS]
+00099| 
+00100|     def snapshot(self, log_tail: int = 50) -> dict:
+00101|         with self.lock:
+00102|             log_lines = [
+00103|                 f"[{e.get('tool', '')}] {e.get('line', '')}"
+00104|                 for e in self.events
+00105|                 if e["event"] == "log"
+00106|             ]
+00107|             return {
+00108|                 "id": self.id,
+00109|                 "type": self.type,
+00110|                 "value": self.value,
+00111|                 "status": self.status,
+00112|                 "created_at": self.created_at,
+00113|                 "started_at": self.started_at,
+00114|                 "finished_at": self.finished_at,
+00115|                 "results": [dict(r) for r in self.results],
+00116|                 "log_tail": "\n".join(log_lines[-log_tail:]),
+00117|             }
+00118| 
+00119|     def persist(self) -> None:
+00120|         try:
+00121|             snap = self.snapshot(log_tail=0)
+00122|             snap["events"] = self.events[-2000:]
+00123|             tmp = JOBS_DIR / f"{self.id}.tmp"
+00124|             tmp.write_text(json.dumps(snap))
+00125|             tmp.replace(JOBS_DIR / f"{self.id}.json")
+00126|         except Exception:
+00127|             pass  # persistence is best-effort
+00128| 
+00129| 
+00130| class JobsManager:
+00131|     def __init__(self):
+00132|         self.max_workers = int(os.environ.get("OSINT_HUB_MAX_CONCURRENT", "2"))
+00133|         self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
+00134|         self.rate = RateLimiter(os.environ.get("OSINT_HUB_RATE_LIMIT", "20/hour"))
+00135|         self.jobs: "collections.OrderedDict[str, Job]" = collections.OrderedDict()
+00136|         self._prune_old_files()
+00137| 
+00138|     # -- public ------------------------------------------------------------
+00139|     def create(
+00140|         self, type_: str, value: "str | dict", tools: list[str], options: dict
+00141|     ) -> Job:
+00142|         job = Job(type_, value, tools, options)
+00143|         self.jobs[job.id] = job
+00144|         self.executor.submit(self._run_job, job)
+00145|         return job
+00146| 
+00147|     def get(self, job_id: str) -> Job | None:
+00148|         return self.jobs.get(job_id)
+00149| 
+00150|     def recent(self, limit: int = 15) -> list[dict]:
+00151|         out = []
+00152|         for job in reversed(self.jobs.values()):
+00153|             val = (
+00154|                 job.value
+00155|                 if isinstance(job.value, str)
+00156|                 else " · ".join(f"{k}:{v}" for k, v in job.value.items() if v)
+00157|             )
+00158|             out.append(
+00159|                 {
+00160|                     "id": job.id,
+00161|                     "type": job.type,
+00162|                     "value": val,
+00163|                     "status": job.status,
+00164|                     "created_at": job.created_at,
+00165|                 }
+00166|             )
+00167|             if len(out) >= limit:
+00168|                 break
+00169|         return out
+00170| 
+00171|     # -- internals -----------------------------------------------------------
+00172|     def _run_job(self, job: Job) -> None:
+00173|         job.status = "running"
+00174|         job.started_at = time.time()
+00175|         job.emit("job_start", tools=job.tools)
+00176|         job.persist()
+00177|         for res in job.results:
+00178|             res["status"] = "running"
+00179|             try:
+00180|                 self._run_tool(job, res)
+00181|             except Exception as exc:  # noqa: BLE001
+00182|                 res["status"] = "error"
+00183|                 res["error"] = f"{type(exc).__name__}: {exc}"
+00184|                 job.emit(
+00185|                     "log",
+00186|                     tool=res["tool"],
+00187|                     qtype=res.get("qtype"),
+00188|                     line=f"[hub] tool crashed: {res['error']}",
+00189|                 )
+00190|             job.emit(
+00191|                 "tool_done",
+00192|                 tool=res["tool"],
+00193|                 qtype=res.get("qtype"),
+00194|                 found_count=len(res["found"]),
+00195|                 info_count=len(res.get("info", [])),
+00196|                 status=res["status"],
+00197|             )
+00198|             job.persist()
+00199|         job.status = (
+00200|             "error" if all(r["status"] == "error" for r in job.results) else "done"
+00201|         )
+00202|         job.finished_at = time.time()
+00203|         job.emit("job_done", status=job.status)
+00204|         job.persist()
+00205| 
+00206|     def _run_tool(self, job: Job, res: dict) -> None:
+00207|         tool_id = res["tool"]
+00208|         spec = TOOLS.get(tool_id)
+00209|         if spec is None:
+00210|             raise ValueError(f"unknown tool {tool_id}")
+00211|         cmd, cwd = spec["build"](res["qvalue"], job.options)
+00212|         exe = resolve_exe(cmd[0])
+00213|         if exe is None:
+00214|             raise FileNotFoundError(f"{cmd[0]} not installed — {spec['hint']}")
+00215|         cmd = [str(exe)] + cmd[1:]
+00216|         job.emit(
+00217|             "log", tool=tool_id, qtype=res.get("qtype"), line=f"[hub] $ {' '.join(cmd)}"
+00218|         )
+00219| 
+00220|         proc = subprocess.Popen(
+00221|             cmd,
+00222|             cwd=cwd,
+00223|             stdout=subprocess.PIPE,
+00224|             stderr=subprocess.STDOUT,
+00225|             text=True,
+00226|             bufsize=1,
+00227|         )
+00228|         watchdog = threading.Timer(
+00229|             TOOL_HARD_TIMEOUT,
+00230|             lambda: (
+00231|                 proc.kill(),
+00232|                 job.emit(
+00233|                     "log",
+00234|                     tool=tool_id,
+00235|                     qtype=res.get("qtype"),
+00236|                     line="[hub] hard timeout — killed",
+00237|                 ),
+00238|             ),
+00239|         )
+00240|         watchdog.daemon = True
+00241|         watchdog.start()
+00242|         try:
+00243|             assert proc.stdout is not None
+00244|             for raw in proc.stdout:
+00245|                 line = strip_ansi(raw.rstrip())
+00246|                 if not line:
+00247|                     continue
+00248|                 job.emit("log", tool=tool_id, qtype=res.get("qtype"), line=line)
+00249|                 parser = spec.get("parse")
+00250|                 if parser:
+00251|                     item = parser(line)
+00252|                     if item:
+00253|                         res["found"].append(item)
+00254|                         job.emit(
+00255|                             "found", tool=tool_id, qtype=res.get("qtype"), item=item
+00256|                         )
+00257|                 iparser = spec.get("parse_info")
+00258|                 if iparser and len(res["info"]) < 80:
+00259|                     iitem = iparser(line)
+00260|                     if iitem:
+00261|                         res["info"].append(iitem)
+00262|                         job.emit(
+00263|                             "info", tool=tool_id, qtype=res.get("qtype"), item=iitem
+00264|                         )
+00265|             rc = proc.wait(timeout=30)
+00266|         finally:
+00267|             watchdog.cancel()
+00268|         res["status"] = "done" if rc == 0 else "error"
+00269|         if rc != 0:
+00270|             res["error"] = f"exit code {rc}"
+00271| 
+00272|     def _prune_old_files(self) -> None:
+00273|         try:
+00274|             files = sorted(
+00275|                 JOBS_DIR.glob("j_*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+00276|             )
+00277|             for old in files[MAX_JOBS_KEPT:]:
+00278|                 old.unlink(missing_ok=True)
+00279|         except Exception:
+00280|             pass
+00281| 
+
+(End of file - total 281 lines)
+</file>

@@ -1,0 +1,289 @@
+<file>
+00017| 
+00018| BASE_DIR = Path(__file__).resolve().parent
+00019| VENV_BIN = BASE_DIR / ".venv" / "bin"  # NB: do NOT use sys.executable.resolve()
+00020| # (venv python is a symlink to system python; resolving it loses the venv bin dir)
+00021| PROJECT_DIR = BASE_DIR.parent
+00022| BIN_DIR = BASE_DIR / "bin"  # local binaries (phoneinfoga)
+00023| PUBLIC_REPOS = PROJECT_DIR.parent / "public_repos"  # cloned catalog (searchphone)
+00024| 
+00025| ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+00026| URL_RE = re.compile(r"https?://[^\s\"')\]]+")
+00027| 
+00028| DATING_DOMAINS = {
+00029|     "tinder.com",
+00030|     "badoo.com",
+00031|     "meetme.com",
+00032|     "adultfriendfinder.com",
+00033|     "okcupid.com",
+00034|     "pof.com",
+00035|     "match.com",
+00036|     "hinge.co",
+00037|     "bumble.com",
+00038|     "grindr.com",
+00039|     "feeld.co",
+00040|     "zoosk.com",
+00041|     "ashleymadison.com",
+00042|     "eharmony.com",
+00043| }
+00044| 
+00045| 
+00046| def strip_ansi(s: str) -> str:
+00047|     return ANSI_RE.sub("", s)
+00048| 
+00049| 
+00050| def resolve_exe(name: str) -> Optional[Path]:
+00051|     """Find an executable: venv bin → backend/bin → PATH."""
+00052|     for d in (VENV_BIN, BIN_DIR):
+00053|         p = d / name
+00054|         if p.is_file() and os.access(p, os.X_OK):
+00055|             return p
+00056|     found = shutil.which(name)
+00057|     return Path(found) if found else None
+00058| 
+00059| 
+00060| def parse_plus_line(line: str, require_url: bool = True) -> Optional[dict]:
+00061|     """Parse `[+] Site: https://url` style lines (sherlock/maigret/ignorant).
+00062| 
+00063|     require_url=True  → only lines containing a URL count as found (sherlock/maigret —
+00064|                         avoids maigret's banner lines like '[+] Using sites database')
+00065|     require_url=False → also accepts '[+] Site : note' (ignorant's phone-registered hits)
+00066| 
+00067|     Handles variants:
+00068|       [+] GitHub: https://github.com/john
+00069|       [+] tinder.com (Tinder): https://tinder.com/@john (200)
+00070|       [+] snapchat : Phone number found          (ignorant, no URL)
+00071|     """
+00072|     line = strip_ansi(line)
+00073|     if "[+]" not in line:
+00074|         return None
+00075|     text = line.split("[+]", 1)[1].strip()
+00076|     m = URL_RE.search(text)
+00077|     if m:
+00078|         url = m.group(0).rstrip(".,);")
+00079|         head = text[: m.start()].strip(" :-(").strip()
+00080|         head = re.sub(r"\s*\([^)]*\)\s*$", "", head).strip()  # drop trailing "(domain)"
+00081|         return {"site": head or url, "url": url}
+00082|     if require_url:
+00083|         return None
+00084|     txt = text.rstrip(".")
+00085|     if "[-]" in txt or "[x]" in txt or "not used" in txt.lower():
+00086|         return (
+00087|             None  # legend/summary lines, e.g. "[+] used, [-] not used, [x] rate limit"
+00088|         )
+00089|     if ":" in txt:
+00090|         txt = txt.split(":", 1)[0].strip()
+00091|     txt = txt.strip("()").strip()
+00092|     return {"site": txt, "url": None} if txt else None
+00093| 
+00094| 
+00095| # --- phoneinfoga structured-info parser -------------------------------------
+00096| # v3 scan output shape:
+00097| #   Results for googlesearch
+00098| #     Social media:            <- subsection headers end with ':' (skipped)
+00099| #     URL: https://...         <- Google-dork pivots -> info items
+00100| #   Results for local
+00101| #     Raw local: 0425228338    <- key: value pairs -> info items
+00102| #     Country: AU
+00103| PIG_INFO_KEYS = {
+00104|     "raw local",
+00105|     "local",
+00106|     "e164",
+00107|     "international",
+00108|     "country",
+00109|     "carrier",
+00110|     "line type",
+00111|     "number type",
+00112|     "region",
+00113|     "timezone",
+00114|     "valid",
+00115|     "type",
+00116|     "area",
+00117| }
+00118| 
+00119| 
+00120| def parse_phoneinfoga_info(line: str) -> Optional[dict]:
+00121|     line = strip_ansi(line).strip()
+00122|     if line.lower().startswith("url:"):
+00123|         url = line.split(":", 1)[1].strip()
+00124|         if url.startswith("http"):
+00125|             return {"key": "search pivot", "url": url}
+00126|         return None
+00127|     if ":" in line and not line.endswith(":"):
+00128|         k, v = line.split(":", 1)
+00129|         k, v = k.strip(), v.strip()
+00130|         if k.lower() in PIG_INFO_KEYS and v:
+00131|             return {"key": k, "value": v}
+00132|     return None
+00133| 
+00134| 
+00135| def _holehe(value: str, opts: dict):
+00136|     return ["holehe", value, "--no-color", "--no-clear"], None
+00137| 
+00138| 
+00139| def _revimg(value: str, opts: dict):
+00140|     engines = opts.get("engines") or ["yandex", "bing", "tineye"]
+00141|     return [
+00142|         str(VENV_BIN / "python"),
+00143|         str(BASE_DIR / "runners" / "revimg.py"),
+00144|         value,
+00145|         "--engines",
+00146|         ",".join(engines),
+00147|     ], None
+00148| 
+00149| 
+00150| # --- command builders -------------------------------------------------------
+00151| # each returns (cmd_list, cwd_or_None); first element is the exe name to resolve
+00152| 
+00153| 
+00154| def _sherlock(value: str, opts: dict):
+00155|     cmd = ["sherlock", value, "--timeout", str(int(opts.get("timeout", 10)))]
+00156|     for s in opts.get("sites") or []:
+00157|         cmd += ["--site", str(s)]
+00158|     return cmd, None
+00159| 
+00160| 
+00161| def _maigret(value: str, opts: dict):
+00162|     cmd = [
+00163|         "maigret",
+00164|         value,
+00165|         "--no-color",
+00166|         "--no-progressbar",
+00167|         "--no-autoupdate",
+00168|         "--no-recursion",
+00169|         "--no-extracting",
+00170|         "--timeout",
+00171|         str(int(opts.get("timeout", 10))),
+00172|     ]
+00173|     for s in opts.get("sites") or []:
+00174|         cmd += ["--site", str(s)]
+00175|     return cmd, None
+00176| 
+00177| 
+00178| def _phoneinfoga(value: str, opts: dict):
+00179|     return ["phoneinfoga", "scan", "-n", value], None
+00180| 
+00181| 
+00182| def _split_phone(value: str) -> tuple[str, str]:
+00183|     """('+' + country_code, national_number). Uses phonenumbers when installed,
+00184|     else a naive +CC split. ignorant's CLI wants them as separate positional args."""
+00185|     try:
+00186|         import phonenumbers  # optional dep, see requirements.txt
+00187| 
+00188|         n = phonenumbers.parse(value, None)
+00189|         return f"+{n.country_code}", str(n.national_number)
+00190|     except ImportError:
+00191|         pass
+00192|     v = re.sub(r"[ \-()]", "", value.strip())
+00193|     m = re.match(r"^\+(\d{1,3})(\d{4,})$", v)
+00194|     if not m:
+00195|         raise ValueError("phone must be international format, e.g. +61425228338")
+00196|     return f"+{m.group(1)}", m.group(2)
+00197| 
+00198| 
+00199| def _ignorant(value: str, opts: dict):
+00200|     cc, national = _split_phone(value)
+00201|     return ["ignorant", cc, national], None
+00202| 
+00203| 
+00204| def _searchphone(value: str, opts: dict):
+00205|     script = PUBLIC_REPOS / "osint" / "searchphone" / "search_phone.py"
+00206|     py = VENV_BIN / "python"
+00207|     cmd = [str(py), str(script), value]
+00208|     return cmd, str(script.parent)
+00209| 
+00210| 
+00211| # --- registry ---------------------------------------------------------------
+00212| 
+00213| TOOLS: dict[str, dict] = {
+00214|     "sherlock": {
+00215|         "name": "Sherlock",
+00216|         "kind": "username",
+00217|         "description": "Hunt down social media accounts by username across 400+ sites (sherlock-project).",
+00218|         "hint": ".venv/bin/pip install sherlock-project",
+00219|         "build": _sherlock,
+00220|         "parse": parse_plus_line,
+00221|     },
+00222|     "maigret": {
+00223|         "name": "Maigret",
+00224|         "kind": "username",
+00225|         "description": "Username → 3000+ sites including dating platforms (Tinder, Badoo, MeetMe, AFF). Powers the Dating tab.",
+00226|         "hint": ".venv/bin/pip install maigret",
+00227|         "build": _maigret,
+00228|         "parse": parse_plus_line,
+00229|     },
+00230|     "phoneinfoga": {
+00231|         "name": "PhoneInfoga",
+00232|         "kind": "phone",
+00233|         "description": "Phone number intelligence: number formats, country, carrier, reputation + Google-dork search pivots.",
+00234|         "hint": "scripts/setup.sh downloads the release binary into backend/bin/",
+00235|         "build": _phoneinfoga,
+00236|         "parse": None,  # no link 'found' items — structured info via parse_info
+00237|         "parse_info": parse_phoneinfoga_info,
+00238|     },
+00239|     "holehe": {
+00240|         "name": "Holehe",
+00241|         "kind": "email",
+00242|         "description": "Checks if an email is registered on 120+ platforms (Instagram, Adobe, etc.) via password-reset flows.",
+00243|         "hint": ".venv/bin/pip install holehe",
+00244|         "build": _holehe,
+00245|         "parse": lambda line: parse_plus_line(line, require_url=False),
+00246|     },
+00247|     "revimg": {
+00248|         "name": "Image Discovery",
+00249|         "kind": "image",
+00250|         "description": "Reverse-image online discovery: finds pages where an image (or similar) appears — Yandex/Bing/TinEye. Discovery only; face analysis stays in qalarc's own face-engine stack.",
+00251|         "hint": ".venv/bin/pip install PicImageSearch pyquery (plus lxml)",
+00252|         "build": _revimg,
+00253|         "parse": parse_plus_line,
+00254|         # library-runner tool (no console script) — installed = runner + venv python present
+00255|         "enabled_check": lambda: (
+00256|             (BASE_DIR / "runners" / "revimg.py").is_file()
+00257|             and (VENV_BIN / "python").exists()
+00258|         ),
+00259|     },
+00260|     "ignorant": {
+00261|         "name": "Ignorant",
+00262|         "kind": "phone",
+00263|         "description": "Checks whether a phone number is registered on platforms (Snapchat, Instagram…).",
+00264|         "hint": ".venv/bin/pip install ignorant",
+00265|         "build": _ignorant,
+00266|         "parse": lambda line: parse_plus_line(line, require_url=False),
+00267|     },
+00268|     "searchphone": {
+00269|         "name": "SearchPhone",
+00270|         "kind": "phone",
+00271|         "description": "Multi-API phone OSINT (Google/GitHub/Reddit/DDG + Hudson Rock) with report generation.",
+00272|         "hint": "requires SEARCHPHONE_ENABLED=1 + API keys — see public_repos/osint/searchphone/example.env",
+00273|         "build": _searchphone,
+00274|         "parse": parse_plus_line,
+00275|         "enabled_check": lambda: os.environ.get("SEARCHPHONE_ENABLED") == "1",
+00276|     },
+00277| }
+00278| 
+00279| 
+00280| def tool_status() -> list[dict]:
+00281|     out = []
+00282|     for tid, spec in TOOLS.items():
+00283|         installed = bool(resolve_exe(tid)) or bool(
+00284|             spec.get("enabled_check") and spec["enabled_check"]()
+00285|         )
+00286|         out.append(
+00287|             {
+00288|                 "id": tid,
+00289|                 "name": spec["name"],
+00290|                 "kind": spec["kind"],
+00291|                 "installed": installed,
+00292|                 "description": spec["description"],
+00293|                 "hint": spec["hint"],
+00294|             }
+00295|         )
+00296|     return out
+00297| 
+00298| 
+00299| def tools_installed_count() -> int:
+00300|     return sum(1 for t in tool_status() if t["installed"])
+00301| 
+
+(End of file - total 301 lines)
+</file>

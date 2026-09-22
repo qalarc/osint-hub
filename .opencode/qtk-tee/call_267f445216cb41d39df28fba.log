@@ -1,0 +1,257 @@
+<file>
+00001| /**
+00002|  * Bottom console: task rows + per-task SSE log streams (cap 500 lines).
+00003|  */
+00004| import { api } from './api';
+00005| import { clear, elapsed, h, timeAgo } from './dom';
+00006| import { streamTaskLogs } from './sse';
+00007| import type { Task, TaskLogLine } from './types';
+00008| 
+00009| const LOG_CAP = 500;
+00010| 
+00011| export interface ConsoleCallbacks {
+00012|   caseId(): string | null;
+00013|   entityLabel(id: string | null): string | null;
+00014|   onTasks?(tasks: Task[]): void;
+00015| }
+00016| 
+00017| interface TaskEntry {
+00018|   task: Task;
+00019|   logs: string[];
+00020|   open: boolean;
+00021|   ctl: AbortController | null;
+00022| }
+00023| 
+00024| export class Console {
+00025|   readonly el: HTMLElement;
+00026|   private bodyEl: HTMLElement;
+00027|   private rowsEl: HTMLElement;
+00028|   private logPane: HTMLElement;
+00029|   private entries = new Map<string, TaskEntry>();
+00030|   private activeLogId: string | null = null;
+00031|   private collapsed = false;
+00032|   private ticker: number;
+00033| 
+00034|   constructor(private readonly cb: ConsoleCallbacks) {
+00035|     this.rowsEl = h('div', { class: 'task-rows' });
+00036|     this.logPane = h('pre', { class: 'log-pane mono', hidden: true });
+00037|     this.bodyEl = h('div', { class: 'console-body' }, this.rowsEl, this.logPane);
+00038| 
+00039|     const chevron = h('button', {
+00040|       class: 'btn btn-ghost btn-sm console-chevron', type: 'button',
+00041|       title: 'collapse / expand', 'aria-expanded': 'true',
+00042|       onclick: () => this.toggle(),
+00043|     }, '▾');
+00044| 
+00045|     this.el = h('footer', { class: 'console', id: 'console' },
+00046|       h('div', { class: 'console-head' },
+00047|         h('span', { class: 'panel-label' }, 'task console'),
+00048|         h('span', { class: 'muted small console-count' }),
+00049|         h('span', { class: 'flex-spacer' }),
+00050|         chevron,
+00051|       ),
+00052|       this.bodyEl,
+00053|     );
+00054| 
+00055|     this.ticker = window.setInterval(() => this.tickElapsed(), 1000);
+00056|   }
+00057| 
+00058|   destroy(): void {
+00059|     window.clearInterval(this.ticker);
+00060|     for (const e of this.entries.values()) e.ctl?.abort();
+00061|   }
+00062| 
+00063|   toggle(collapse?: boolean): void {
+00064|     this.collapsed = collapse ?? !this.collapsed;
+00065|     this.el.classList.toggle('collapsed', this.collapsed);
+00066|     const btn = this.el.querySelector<HTMLButtonElement>('.console-chevron');
+00067|     if (btn) {
+00068|       btn.textContent = this.collapsed ? '▴' : '▾';
+00069|       btn.setAttribute('aria-expanded', String(!this.collapsed));
+00070|     }
+00071|   }
+00072| 
+00073|   async refresh(caseId?: string | null): Promise<void> {
+00074|     let tasks: Task[];
+00075|     try {
+00076|       tasks = await api.listTasks(caseId ?? this.cb.caseId() ?? undefined);
+00077|     } catch {
+00078|       return;
+00079|     }
+00080|     this.applyTasks(tasks);
+00081|   }
+00082| 
+00083|   /** Server is source of truth; merge with local log buffers + open state. */
+00084|   applyTasks(tasks: Task[]): void {
+00085|     const seen = new Set<string>();
+00086|     for (const t of tasks) {
+00087|       seen.add(t.id);
+00088|       const prev = this.entries.get(t.id);
+00089|       if (prev) {
+00090|         prev.task = t;
+00091|       } else {
+00092|         this.entries.set(t.id, { task: t, logs: [], open: false, ctl: null });
+00093|       }
+00094|     }
+00095|     // drop tasks that vanished server-side (capped list)
+00096|     for (const id of [...this.entries.keys()]) {
+00097|       if (!seen.has(id)) this.entries.delete(id);
+00098|     }
+00099|     this.syncStreams();
+00100|     this.render();
+00101|     this.cb.onTasks?.(tasks);
+00102|   }
+00103| 
+00104|   /** Called when a task is created locally. */
+00105|   noteCreated(task: Task): void {
+00106|     const existing = this.entries.get(task.id);
+00107|     if (!existing) {
+00108|       this.entries.set(task.id, { task, logs: [], open: true, ctl: null });
+00109|       this.activeLogId = task.id;
+00110|     }
+00111|     this.el.classList.remove('collapsed');
+00112|     this.collapsed = false;
+00113|     void this.refresh();
+00114|   }
+00115| 
+00116|   /** Left-rail mini-feed click: open console + expand that task. */
+00117|   expand(id: string): void {
+00118|     const e = this.entries.get(id);
+00119|     if (!id) return;
+00120|     if (e) e.open = true;
+00121|     this.activeLogId = id;
+00122|     this.collapsed = false;
+00123|     this.el.classList.remove('collapsed');
+00124|     const btn = this.el.querySelector<HTMLButtonElement>('.console-chevron');
+00125|     if (btn) { btn.textContent = '▾'; btn.setAttribute('aria-expanded', 'true'); }
+00126|     this.render();
+00127|   }
+00128| 
+00129|   private syncStreams(): void {
+00130|     for (const e of this.entries.values()) {
+00131|       const running = e.task.status === 'running';
+00132|       if (running && !e.ctl) {
+00133|         const ctl = new AbortController();
+00134|         e.ctl = ctl;
+00135|         e.logs.push(`── streaming ${e.task.id} ──`);
+00136|         void streamTaskLogs(e.task.id, (line) => this.onLogLine(e, line), ctl.signal)
+00137|           .catch(() => { /* stream broke; polling refresh will catch up */ })
+00138|           .finally(() => {
+00139|             if (e.ctl === ctl) e.ctl = null;
+00140|             this.renderIfActive(e.task.id);
+00141|           });
+00142|       } else if (!running && e.ctl) {
+00143|         e.ctl.abort();
+00144|         e.ctl = null;
+00145|       }
+00146|     }
+00147|   }
+00148| 
+00149|   private onLogLine(e: TaskEntry, line: TaskLogLine): void {
+00150|     const lvl = (line.level ?? 'info').toLowerCase();
+00151|     const mark = lvl === 'error' ? '!!' : lvl === 'warn' ? ' !' : '· ';
+00152|     e.logs.push(`${line.ts ?? ''} ${mark} ${line.msg ?? ''}`);
+00153|     if (e.logs.length > LOG_CAP) e.logs.splice(0, e.logs.length - LOG_CAP);
+00154|     // a log line implies liveness — light refresh of status text only
+00155|     this.renderIfActive(e.task.id);
+00156|   }
+00157| 
+00158|   private renderIfActive(taskId: string): void {
+00159|     if (this.activeLogId !== taskId) return;
+00160|     const e = this.entries.get(taskId);
+00161|     if (!e) return;
+00162|     this.renderLogPane(e);
+00163|   }
+00164| 
+00165|   private render(): void {
+00166|     clear(this.rowsEl);
+00167|     const list = [...this.entries.values()]
+00168|       .sort((a, b) => b.task.created_at.localeCompare(a.task.created_at))
+00169|       .slice(0, 40);
+00170| 
+00171|     const count = this.el.querySelector<HTMLElement>('.console-count');
+00172|     if (count) {
+00173|       const running = list.filter((e) => e.task.status === 'running').length;
+00174|       count.textContent = `${list.length} task${list.length === 1 ? '' : 's'}${running ? ` · ${running} running` : ''}`;
+00175|     }
+00176| 
+00177|     if (list.length === 0) {
+00178|       this.rowsEl.append(h('div', { class: 'muted small pad8' },
+00179|         'no tasks yet — select an entity and run hub scan / enrich / research from the inspector'));
+00180|     }
+00181| 
+00182|     for (const e of list) {
+00183|       this.rowsEl.append(this.taskRow(e));
+00184|     }
+00185|     const active = this.activeLogId ? this.entries.get(this.activeLogId) : null;
+00186|     if (active && active.open) this.renderLogPane(active);
+00187|     else { this.logPane.hidden = true; }
+00188|   }
+00189| 
+00190|   private taskRow(e: TaskEntry): HTMLElement {
+00191|     const t = e.task;
+00192|     const ing = t.ingested;
+00193|     const ingBits: string[] = [];
+00194|     if (ing?.entities) ingBits.push(`+${ing.entities}e`);
+00195|     if (ing?.relations) ingBits.push(`+${ing.relations}r`);
+00196|     if (ing?.evidence) ingBits.push(`+${ing.evidence}v`);
+00197|     const status = t.status === 'running'
+00198|       ? h('span', { class: 'spin', title: 'running' })
+00199|       : h('span', { class: `dot dot-${t.status === 'done' ? 'up' : t.status === 'error' ? 'down' : 'off'}`, title: t.status });
+00200| 
+00201|     const targetLabel = t.target ? (this.cb.entityLabel(t.target) ?? t.target) : '—';
+00202| 
+00203|     const row = h('div', {
+00204|       class: `task-row st-${t.status}${e.open ? ' open' : ''}`, tabindex: '0',
+00205|       'data-task': t.id,
+00206|       onclick: () => {
+00207|         e.open = !e.open;
+00208|         this.activeLogId = e.open ? t.id : this.activeLogId;
+00209|         if (e.open && t.logs && t.logs.length > 0 && e.logs.length === 0) {
+00210|           e.logs.push(...t.logs.slice(-LOG_CAP)); // seed from snapshot
+00211|         }
+00212|         this.render();
+00213|       },
+00214|       onkeydown: (ev: KeyboardEvent) => { if (ev.key === 'Enter') row.click(); },
+00215|     },
+00216|       status,
+00217|       h('span', { class: 'task-kind mono' }, t.kind),
+00218|       h('span', { class: 'task-target', title: t.target ?? '' }, targetLabel),
+00219|       h('span', { class: 'task-ing mono' }, ingBits.join(' ')),
+00220|       h('span', { class: 'task-elapsed mono', 'data-created': t.created_at, 'data-finished': t.finished_at ?? '' },
+00221|         elapsed(t.created_at, t.finished_at)),
+00222|       h('span', { class: 'task-summary muted', title: t.summary ?? '' }, t.summary ?? (t.status === 'error' ? 'error' : '')),
+00223|     );
+00224|     return row;
+00225|   }
+00226| 
+00227|   private renderLogPane(e: TaskEntry): void {
+00228|     this.logPane.hidden = false;
+00229|     const nearBottom = this.logPane.scrollHeight - this.logPane.scrollTop - this.logPane.clientHeight < 40;
+00230|     const text = e.logs.length > 0
+00231|       ? e.logs.join('\n')
+00232|       : (e.task.logs && e.task.logs.length > 0
+00233|         ? e.task.logs.slice(-LOG_CAP).join('\n')
+00234|         : (e.task.status === 'queued' ? 'queued…' : 'no log lines yet'));
+00235|     this.logPane.textContent = text;
+00236|     if (nearBottom) this.logPane.scrollTop = this.logPane.scrollHeight;
+00237|   }
+00238| 
+00239|   private tickElapsed(): void {
+00240|     const nodes = this.el.querySelectorAll<HTMLElement>('.task-elapsed[data-created]');
+00241|     for (const n of nodes) {
+00242|       if (n.dataset.finished) continue;
+00243|       const created = n.dataset.created;
+00244|       if (created) n.textContent = elapsed(created, null);
+00245|     }
+00246|   }
+00247| 
+00248|   ageOfNewest(): string | null {
+00249|     const list = [...this.entries.values()].sort((a, b) => b.task.created_at.localeCompare(a.task.created_at));
+00250|     return list[0] ? timeAgo(list[0].task.created_at) : null;
+00251|   }
+00252| }
+00253| 
+
+(End of file - total 253 lines)
+</file>

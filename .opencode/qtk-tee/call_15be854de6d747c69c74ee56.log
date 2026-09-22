@@ -1,0 +1,321 @@
+<file>
+00001| # NEXUS — Investigation Workbench: SYSTEM CONTRACT v1
+00002| 
+00003| > Single source of truth for all nexus components. Every crate/module codes
+00004| > against THIS document. If reality and contract diverge, fix reality.
+00005| > All JSON is snake_case. All timestamps are RFC3339 UTC strings.
+00006| > All ids are prefixed: `c_` case, `e_` entity, `r_` relation, `v_` evidence,
+00007| > `k_` timeline event, `t_` task. Generated as `<prefix>_<16 hex>` unless
+00008| > uuids already exist.
+00009| 
+00010| Authorized-use OSINT only. Ethics framing mirrors flowsint ETHICS.md.
+00011| 
+00012| ## 0. Layout & ownership (do NOT touch other zones)
+00013| 
+00014| | Zone | Owner | Path |
+00015| |---|---|---|
+00016| | core engine | agent-core | `nexus/crates/nexus-core/**` |
+00017| | server + connectors | agent-server | `nexus/crates/nexus-server/**` |
+00018| | desktop shell | agent-tauri | `nexus/crates/nexus-tauri/**` |
+00019| | web UI | agent-ui | `nexus/webui/**` |
+00020| | mcp + docs + scripts | orchestrator | `nexus/mcp/**`, `nexus/docs/**`, `scripts/**` |
+00021| 
+00022| ## 1. Configuration (env vars, all optional)
+00023| 
+00024| | Var | Default | Meaning |
+00025| |---|---|---|
+00026| | `NEXUS_DB` | `<repo>/nexus/data/nexus.db` | SQLite file (WAL) |
+00027| | `NEXUS_PORT` | `8801` | HTTP port for nexus-server |
+00028| | `NEXUS_HUB_URL` | `http://127.0.0.1:8799` | qalarc OSINT hub base |
+00029| | `OSINT_HUB_TOKEN` | (none) | Bearer token for the hub (reused name) |
+00030| | `FLOWSINT_URL` | (none) | flowsint base (e.g. http://127.0.0.1:5173) |
+00031| | `OPENPLANTER_BIN` | (auto-discover `openplanter-agent` on PATH) | CLI agent binary |
+00032| | `OPENPLANTER_WORKSPACES` | `<repo>/nexus/data/workspaces` | agent workspaces root |
+00033| | `ARCHON_URL` | `http://127.0.0.1:7843` | archon canon/RAG pillar |
+00034| | `LAYA_URL` | (none) | laya typed-decision HTTP bridge; heuristic fallback when unset |
+00035| | `NEXUS_LAYA_LOG` | (none) | JSONL path to log triage decisions for future fine-tuning |
+00036| 
+00037| Health `{connector: up|down|unset}` for hub, flowsint, openplanter, archon, laya.
+00038| 
+00039| ## 2. Data model (nexus-core)
+00040| 
+00041| ### Entity
+00042| ```json
+00043| {"id":"e_ab12","case_id":"c_1","etype":"username","label":"johndoe",
+00044|  "data":{},"confidence":1.0,"pinned":false,
+00045|  "first_seen":"2026-09-22T00:00:00Z","last_seen":"2026-09-22T00:00:00Z"}
+00046| ```
+00047| `etype` ∈ fixed enum: `person org username alias email phone domain subdomain
+00048| ip asn cidr website social_profile wallet transaction image document article
+00049| event location topic note`.
+00050| Normalization keys (for dedup): email→lowercase; domain/subdomain→lowercase,
+00051| strip leading `www.`; username→lowercase; phone→E.164 digits; ip/asn/cidr
+00052| verbatim; website→lowercased host+path. `data` is free JSON (e.g.
+00053| `{"platform":"github","url":"..."}`).
+00054| 
+00055| ### Relation
+00056| ```json
+00057| {"id":"r_1","case_id":"c_1","src":"e_1","dst":"e_2","rel":"uses",
+00058|  "weight":1.0,"confidence":0.9,"source":"hub:sherlock",
+00059|  "evidence":{"title":"sherlock hit","url":"https://github.com/johndoe"},
+00060|  "created_at":"..."}
+00061| ```
+00062| `rel` free-form typed string, canonical set: `uses owns resolves_to
+00063| subdomain_of registered_to mentions contacted same_as paid_to located_in
+00064| member_of works_at sourced_from derived_from related_to posted_on`.
+00065| 
+00066| ### Evidence
+00067| ```json
+00068| {"id":"v_1","case_id":"c_1","subject":"e_1","kind":"tool_result",
+00069|  "title":"...","url":"...","snippet":"...","raw":{},
+00070|  "confidence":0.9,"ts":"..."}
+00071| ```
+00072| `kind` ∈ `tool_result web_fetch note wiki_doc archon_answer
+00073| flowsint_enricher openplanter_finding manual`. Subject may be entity id or
+00074| relation id.
+00075| 
+00076| ### Timeline event
+00077| ```json
+00078| {"id":"k_1","case_id":"c_1","ts":"...","entity_id":"e_1","kind":"scan",
+00079|  "title":"...","detail":{},"source":"hub"}
+00080| ```
+00081| 
+00082| ### Case
+00083| ```json
+00084| {"id":"c_1","name":"Case 41 — subject X","slug":"case-41-subject-x",
+00085|  "status":"active","notes":"","tags":[],"created_at":"...","updated_at":"..."}
+00086| ```
+00087| 
+00088| ### Wiki doc (OpenPlanter-style, per entity)
+00089| Stored 1:1 with entity (`nexus-core` auto-skeletons it):
+00090| `{"entity_id":"e_1","markdown":"# <label>\n\n## Summary ...\n## Known facts\n## Connections\n## Timeline\n## Open questions\n## Sources\n","updated_at":"..."}`
+00091| Sections are re-rendered by `render` (connections/timeline/sources refresh,
+00092| human prose preserved under Summary / Open questions).
+00093| 
+00094| ## 3. nexus-core public API (crates/nexus-core)
+00095| 
+00096| ```rust
+00097| pub struct Store { /* rusqlite Connection behind Mutex, WAL */ }
+00098| impl Store {
+00099|     pub fn open(path: &Path) -> Result<Self>;
+00100|     // cases
+00101|     pub fn create_case(&self, name: &str, notes: &str, tags: &[String]) -> Result<Case>;
+00102|     pub fn list_cases(&self) -> Result<Vec<Case>>;
+00103|     pub fn get_case(&self, id: &str) -> Result<Option<Case>>;
+00104|     pub fn update_case(&self, id: &str, status: Option<&str>, notes: Option<&str>) -> Result<()>;
+00105|     pub fn delete_case(&self, id: &str) -> Result<()>;
+00106|     // entities
+00107|     pub fn add_entity(&self, case_id: &str, NewEntity) -> Result<Entity>; // resolves/dedups
+00108|     pub fn get_entity(&self, id: &str) -> Result<Option<Entity>>;
+00109|     pub fn update_entity(&self, id: &str, patch: EntityPatch) -> Result<Entity>;
+00110|     pub fn delete_entity(&self, id: &str) -> Result<()>;
+00111|     pub fn merge_entities(&self, primary: &str, other: &str) -> Result<Entity>; // same_as edge, relations re-pointed
+00112|     pub fn find_entity(&self, case_id: &str, etype: &str, label: &str) -> Result<Option<Entity>>;
+00113|     pub fn list_entities(&self, case_id: &str) -> Result<Vec<Entity>>;
+00114|     // relations / evidence / timeline
+00115|     pub fn add_relation(&self, NewRelation) -> Result<Relation>; // dedup on (src,dst,rel)
+00116|     pub fn delete_relation(&self, id: &str) -> Result<()>;
+00117|     pub fn list_relations(&self, case_id: &str) -> Result<Vec<Relation>>;
+00118|     pub fn add_evidence(&self, NewEvidence) -> Result<Evidence>;
+00119|     pub fn list_evidence(&self, subject: &str) -> Result<Vec<Evidence>>;
+00120|     pub fn add_timeline(&self, NewEvent) -> Result<TimelineEvent>;
+00121|     pub fn list_timeline(&self, case_id: &str) -> Result<Vec<TimelineEvent>>;
+00122|     // wiki docs
+00123|     pub fn get_doc(&self, entity_id: &str) -> Result<Option<String>>;
+00124|     pub fn set_doc(&self, entity_id: &str, markdown: &str) -> Result<()>;
+00125|     pub fn render_doc(&self, entity_id: &str) -> Result<String>; // skeleton + graph facts, keeps prose
+00126| }
+00127| pub struct Graph { pub nodes: Vec<Entity>, pub edges: Vec<Relation> }
+00128| pub fn load_graph(store: &Store, case_id: &str) -> Result<Graph>;
+00129| // algorithms (graph.rs)
+00130| pub fn neighbors(g: &Graph, id: &str, depth: usize) -> Vec<&Entity>;
+00131| pub fn shortest_path(g: &Graph, a: &str, b: &str) -> Option<Vec<String>>; // entity ids
+00132| pub fn degree_centrality(g: &Graph) -> BTreeMap<String, usize>;
+00133| pub fn pagerank(g: &Graph, damping: f64, iters: usize) -> BTreeMap<String, f64>;
+00134| pub fn components(g: &Graph) -> Vec<Vec<String>>;        // connected components
+00135| pub fn communities(g: &Graph) -> BTreeMap<String, usize>; // label propagation
+00136| // pivot.rs
+00137| pub struct PivotSuggestion { pub entity_id: String, pub action: String,  // e.g. "hub_scan:username"
+00138|     pub reason: String, pub priority: f64 }
+00139| pub fn suggest_pivots(g: &Graph, entity_id: &str, connectors: &[&str]) -> Vec<PivotSuggestion>;
+00140| // resolve.rs — normalize(etype,label)->String, similarity(a,b)->f64 (jaro-winkler), merge candidates
+00141| // report.rs
+00142| pub fn dossier(g: &Graph, case: &Case, store: &Store) -> String; // full markdown dossier w/ evidence appendix
+00143| pub fn brief(g: &Graph, case: &Case, store: &Store) -> String;   // article brief: lede angles, claims+evidence status, open questions, sources
+00144| ```
+00145| Schema auto-migrates on open (`CREATE TABLE IF NOT EXISTS`, `PRAGMA user_version`).
+00146| 
+00147| ## 4. HTTP API (nexus-server, axum; serves webui/dist as static root)
+00148| 
+00149| All under `/api`. Errors: `{"error": "..."}` with 4xx/5xx. Success bodies as
+00150| specified. Long ops → tasks. Global SSE bus at `GET /api/events` emits JSON
+00151| lines: `{"type":"case_updated|task_update|entity_added","case_id":...,...}`.
+00152| 
+00153| ### Cases / graph
+00154| - `GET  /api/health` → `{"ok":true,"version":"0.1.0","connectors":{"hub":"up","flowsint":"unset","openplanter":"down","archon":"up","laya":"unset"}}`
+00155| - `GET  /api/cases` → `{"cases":[Case...]}`
+00156| - `POST /api/cases` `{name, notes?, tags?}` → 201 `{"case":Case}`
+00157| - `GET  /api/cases/{id}` → `{"case":Case,"stats":{"entities":N,"relations":N,"evidence":N,"tasks":N}}`
+00158| - `PATCH /api/cases/{id}` `{status?, notes?}` → `{"case":Case}`
+00159| - `DELETE /api/cases/{id}` → `{"ok":true}`
+00160| - `GET  /api/cases/{id}/graph` → `{"nodes":[Entity...],"edges":[Relation...],
+00161|      "analysis":{"degree":{},"pagerank":{},"communities":{},"components":[[...]]}}`
+00162| - `GET  /api/cases/{id}/path?a=e_1&b=e_2` → `{"path":[ids] | null}`
+00163| - `GET  /api/cases/{id}/pivots?entity=e_1` → `{"pivots":[PivotSuggestion...]}`
+00164| 
+00165| ### Entities / relations / evidence / timeline / docs
+00166| - `POST /api/cases/{id}/entities` `{etype,label,data?,confidence?}` → 201 `{"entity":Entity,"deduplicated":bool}`
+00167| - `GET  /api/entities/{id}` → `{"entity":E,"relations":[R...],"evidence":[V...],"doc":str|null}`
+00168| - `PATCH /api/entities/{id}` `{label?,data?,pinned?,confidence?}` → `{"entity":E}`
+00169| - `DELETE /api/entities/{id}` → `{"ok":true}`
+00170| - `POST /api/entities/{id}/merge` `{other:"e_2"}` → `{"entity":E}`
+00171| - `POST /api/relations` `{case_id,src,dst,rel,weight?,confidence?,source?,evidence?}` → 201 `{"relation":R}`
+00172| - `DELETE /api/relations/{id}` → `{"ok":true}`
+00173| - `POST /api/evidence` `{case_id,subject,kind,title?,url?,snippet?,raw?,confidence?}` → 201 `{"evidence":V}`
+00174| - `GET  /api/entities/{id}/evidence` → `{"evidence":[V...]}`
+00175| - `GET  /api/cases/{id}/timeline` → `{"events":[K...]}`
+00176| - `POST /api/cases/{id}/timeline` `{ts?,entity_id?,kind,title,detail?,source?}` → 201 `{"event":K}`
+00177| - `GET  /api/entities/{id}/doc` → `{"doc":str}`
+00178| - `PATCH /api/entities/{id}/doc` `{markdown}` → `{"doc":str}`
+00179| - `POST /api/entities/{id}/doc/render` → `{"doc":str}`
+00180| 
+00181| ### Tasks (async connector runs)
+00182| - `POST /api/cases/{id}/tasks` `{kind, target?, params?}` → 202 `{"task":T}`
+00183|   - `hub_scan` — params `{scan:"username|phone|email|image", value?}` (value
+00184|     defaults to target entity label). Runs hub multi-scan, ingests every hit
+00185|     as entity + relation (`uses`/`resolves_to`) + evidence + timeline.
+00186|   - `flowsint_enrich` — params `{enrichers:["subdomain_discovery",...]}` on
+00187|     target entity; ingests produced nodes/edges.
+00188|   - `openplanter_research` — params `{question}`. Spawns CLI agent in the
+00189|     case workspace; ingests artifacts as documents/evidence + extracted
+00190|     entities (email/phone/domain/ip/wallet/username regex sweep).
+00191|   - `archon_ground` — params `{question, sandbox?, top_k?}`. Ask archon,
+00192|     attach answer+citations as evidence + doc "Sources" + timeline.
+00193|   - `web_pivots` — params `{}` → builds search-launcher set for target,
+00194|     stored as note entity data + timeline.
+00195| - `GET  /api/tasks?case_id=` → `{"tasks":[T...]}` (newest first, cap 100)
+00196| - `GET  /api/tasks/{id}` → `{"task":T}`
+00197| - `GET  /api/tasks/{id}/stream` → SSE `{"task_id","level","msg","ts"}` lines
+00198| Task JSON: `{"id":"t_1","case_id":"c_1","kind":"hub_scan","status":"queued|running|done|error","target":null,"params":{},"created_at":...,"finished_at":null,"summary":"14 sites hit","ingested":{"entities":12,"relations":14,"evidence":14},"logs":[...]}`
+00199| 
+00200| ### Reports / interchange / laya / archon
+00201| - `GET /api/cases/{id}/dossier.md` → text/markdown
+00202| - `GET /api/cases/{id}/brief.md` → text/markdown
+00203| - `GET /api/cases/{id}/export.json` → full case (nodes, edges, evidence, timeline, docs)
+00204| - `POST /api/cases/import` — accepts nexus export.json shape → 201 new case
+00205| - `POST /api/laya/triage` `{case_id}` → `{"ranked":[{"entity_id","score","verdict","reason"}...],"engine":"laya|heuristic"}`
+00206| - `GET  /api/archon/status` → `{"up":bool,"sandboxes":[...]}` (empty list when down)
+00207| - `POST /api/archon/ask` `{question, case_id?, sandbox?, top_k?}` → `{"ok":true,"answer","citations":[...],"evidence":V}` (evidence attached when case_id given)
+00208| - `POST /api/archon/push_case` `{case_id, sandbox?}` → creates/refreshes sandbox
+00209|   named `nexus-<slug>`, pushes dossier.md as canon doc → `{"ok":true,"sandbox":{...}}`
+00210| 
+00211| ### Server bootstrap (nexus-server lib — REQUIRED signature for tauri)
+00212| ```rust
+00213| pub struct Config { pub db_path: PathBuf, pub hub_url: String, pub hub_token: Option<String>,
+00214|     pub flowsint_url: Option<String>, pub openplanter_bin: Option<String>,
+00215|     pub workspaces: PathBuf, pub archon_url: String, pub laya_url: Option<String>,
+00216|     pub laya_log: Option<PathBuf>, pub web_dist: Option<PathBuf> }
+00217| impl Config { pub fn from_env() -> Self }
+00218| pub struct AppState { /* core Store + config + task engine + bus */ }
+00219| pub async fn init_state(cfg: Config) -> AppState;
+00220| pub fn build_router(state: AppState) -> axum::Router; // static UI mounted LAST (fallback "/" -> index.html)
+00221| pub async fn serve(cfg: Config) -> anyhow::Result<()>; // bind 127.0.0.1:NEXUS_PORT, convenience for CLI
+00222| ```
+00223| 
+00224| ## 5. Connector contracts (nexus-server/connectors/)
+00225| 
+00226| - **hub.rs** — `POST {NEXUS_HUB_URL}/api/scan` `{type:"multi",value,tools:[...],options:{}}`
+00227|   w/ `Authorization: Bearer <redacted> (omit when unset) → 202
+00228|   `{job_id}`; poll `GET /api/jobs/{id}` every 2s until `status` ∈
+00229|   `done|error` (timeout 15min). Job snapshot shape:
+00230|   `{id,status,created,finished,results:[{qtype,tool,status,found:[{site,url}],info:[{k,v}],error}...],events:[...]}`.
+00231|   Digest → per hit: entity(etype by qtype: username/phone/email) + relation
+00232|   to the scanned target (`uses`) + evidence{tool_result,url,site}.
+00233| - **flowsint.rs** — base `FLOWSINT_URL`. `up` = `GET {base}/api/health`
+00234|   responds ok (any 2xx). Enricher run: `POST {base}/api/enrichers/run`
+00235|   `{type, value, enricher}` — VERIFY exact route/shape against flowsint docs
+00236|   (https://github.com/reconurge/flowsint/tree/main/docs) at build time; if
+00237|   the API differs, adapt here and note in `nexus/docs/INTEGRATIONS.md`.
+00238|   Ingest: map returned nodes to nexus etypes (their Domain/IP/ASN/CIDR/
+00239|   Individual/Organization/Email/Phone/Website/Social/Credentials/Wallet set),
+00240|   edges to canonical rels, keep provenance `flowsint:<enricher>`.
+00241| - **openplanter.rs** — run `{bin} --task {question} --workspace {dir}
+00242|   --headless --no-tui` (add `--provider ollama` when
+00243|   `OPENPLANTER_PROVIDER=ollama`), cwd = fresh per-task dir under
+00244|   `OPENPLANTER_WORKSPACES/<case_slug>/<task_id>/`, kill after 20min. After
+00245|   exit: walk dir for files written during run (md/txt/json/csv, <2MB);
+00246|   each → evidence{kind:openplanter_finding} + document entity; regex-sweep
+00247|   text for emails/phones/domains/ips/usernames/wallets → candidate entities
+00248|   linked `derived_from` the task document. stdout tail → task logs.
+00249| - **archon.rs** — exact shapes from tulpa pillars.py (verified 2026-09):
+00250|   `GET  {ARCHON_URL}/api/sandboxes` → 200 list[{id,name,library_id}]
+00251|   `POST {ARCHON_URL}/api/sandboxes` `{"name":...}` → 200/201 {id,...}
+00252|   `POST {ARCHON_URL}/api/ask` `{"question","sandbox_id"?,"libraries"?,"top_k"?}`
+00253|     → 200 `{answer,citations,libraries_searched,backend,found}`
+00254|   Down/unreachable → `{"ok":false,"detail"}`; NEVER hard-fail a case op on
+00255|   archon being down (degrade, mirror tulpa behavior).
+00256| - **laya.rs** — when `LAYA_URL` set: `POST {LAYA_URL}/predict`
+00257|   `{domain:"osint-grading", state, questions}` (typed decision; triage
+00258|   question set: `{"lead_value": {"type":"score", ...}}`) — tolerate failure →
+00259|   heuristic. Heuristic scorer: pinned boost, etype weights
+00260|   (person>username>email>phone>domain>ip>other), evidence-count log boost,
+00261|   connector-availability boost. Log every decision (engine, inputs, output)
+00262|   JSONL to `NEXUS_LAYA_LOG` when set → feeds future `nexus-triage` fine-tune.
+00263| - **websearch.rs** — pure URL builders (no scraping): google/ddg/bing/news/
+00264|   wikipedia/reddit/youtube + site: dorks per etype + username guesses.
+00265| 
+00266| ## 6. Web UI (webui/ — Vite + TypeScript + Cytoscape.js)
+00267| 
+00268| - `npm run build` → `webui/dist/` (server serves it; tauri webview loads server URL).
+00269| - Stack: vite + typescript, cytoscape + cytoscape-fcose (dagre/cose fallback
+00270|   if fcose troublesome), no CSS framework — hand-rolled, matching the hub's
+00271|   "steddi engineering-drawing" aesthetic: dark blueprint grid bg, film grain,
+00272|   mono type (ui-monospace stack), 1px hairlines, purple accent #a78bfa,
+00273|   amber warnings; panels with corner ticks. Zero external runtime requests.
+00274| - Panes: left case rail (cases, connector health dots, new case); center
+00275|   graph canvas (etype color map, label+, click select, shift-click = path
+00276|   mode A→B, search + type filter chips, layout buttons force/grid/circle);
+00277|   right inspector drawer (entity fields, relations list, evidence list,
+00278|   wiki doc editor w/ render button, action buttons: hub scan / flowsint
+00279|   enrich / openplanter research / archon ground / pivots); bottom console
+00280|   (tasks + SSE logs); top bar (case name, tabs Graph|Timeline|Analysis|Story,
+00281|   settings gear). Analysis tab: centrality+pagerank tables, communities,
+00282|   pivot suggestion cards w/ one-click run. Story tab: dossier.md + brief.md
+00283|   rendered (tiny in-house md renderer), copy/download, "push to archon".
+00284| - Settings modal writes to `localStorage: nexus_settings` `{hub_url,hub_token,
+00285|   flowsint_url,openplanter_bin,archon_url,laya_url}` → `POST /api/admin/config`
+00286|   (server merges runtime-overridable connector settings; env stays default).
+00287|   → so ADD `POST /api/admin/config` accepting a partial Config JSON (subset
+00288|   fields above, db path NOT overridable), returns effective redacted config.
+00289| - All fetches via `api()` wrapper (same-origin `/api`).
+00290| 
+00291| ## 7. Tauri shell (nexus-tauri)
+00292| 
+00293| Tauri 2, app id `com.qalarc.nexus`, window 1440x900 min 1100x700, title
+00294| "NEXUS — qalarc investigation workbench". `main.rs` (tokio runtime):
+00295| `init_state(Config::from_env())` → bind `127.0.0.1:0` via
+00296| `axum::serve` on `build_router(state)` → get port → open WebviewWindow at
+00297| `http://127.0.0.1:{port}`. `tauri.conf.json` frontendDist points to a
+00298| placeholder (`src/`) since UI is server-served; devUrl unused. Cargo deps:
+00299| `tauri = { version = "2", features = [] }`, `tokio`, `nexus-server` (path).
+00300| Build: `cargo build -p nexus-tauri` (CLI `nexus-tauri` runs server-only with
+00301| `--headless` flag printing the URL — usable without webview libs).
+00302| Provide `nexus/crates/nexus-tauri/README.md` with `cargo tauri` dev/build
+00303| instructions (npx @tauri-apps/cli).
+00304| 
+00305| ## 8. Done criteria per zone
+00306| - core: `cargo test -p nexus-core` green (≥15 unit tests: resolve dedup,
+00307|   merge, path, pagerank sanity, communities, doc render keeps prose, dossier
+00308|   contains sections, pivot ranking).
+00309| - server: `cargo check -p nexus-server` clean; `cargo test -p nexus-server`
+00310|   green (router tests w/ in-memory temp DB: case CRUD, entity dedup, task
+00311|   hub_scan against a **mock hub** (axum test server returning fixture job) —
+00312|   no real network in tests).
+00313| - ui: `npm install && npm run build` green, `dist/index.html` self-contained
+00314|   (no CDN), tsc strict no errors.
+00315| - tauri: `cargo check -p nexus-tauri` green (webview libs present on this
+00316|   machine).
+00317| 
+
+(End of file - total 317 lines)
+</file>

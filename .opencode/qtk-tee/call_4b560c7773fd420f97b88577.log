@@ -1,0 +1,248 @@
+<file>
+00001| <file>
+00002| 00001| /**
+00003| 00002|  * Typed API client for the nexus-server HTTP surface (CONTRACT.md §4).
+00004| 00003|  * Same-origin only; every fetch is cache: no-store; `{"error": ...}` bodies
+00005| 00004|  * become ApiError for the UI to toast.
+00006| 00005|  */
+00007| 00006| import type {
+00008| 00007|   Case, CaseGraph, Entity, EntityDetail, Evidence, Health, LayaRanked,
+00009| 00008|   PivotSuggestion, Relation, Task, TimelineEvent, NexusSettings,
+00010| 00009| } from './types';
+00011| 00010| 
+00012| 00011| const BASE = '/api';
+00013| 00012| 
+00014| 00013| export class ApiError extends Error {
+00015| 00014|   readonly status: number;
+00016| 00015|   constructor(status: number, message: string) {
+00017| 00016|     super(message);
+00018| 00017|     this.name = 'ApiError';
+00019| 00018|     this.status = status;
+00020| 00019|   }
+00021| 00020| }
+00022| 00021| 
+00023| 00022| function errFromBody(status: number, body: unknown): ApiError {
+00024| 00023|   if (body && typeof body === 'object' && 'error' in body) {
+00025| 00024|     const e = (body as { error: unknown }).error;
+00026| 00025|     if (typeof e === 'string' && e) return new ApiError(status, e);
+00027| 00026|   }
+00028| 00027|   return new ApiError(status, `${status} ${STATUS_TEXT[status] ?? ''}`.trim());
+00029| 00028| }
+00030| 00029| 
+00031| 00030| const STATUS_TEXT: Record<number, string> = {
+00032| 00031|   400: 'bad request', 401: 'unauthorized', 403: 'forbidden', 404: 'not found',
+00033| 00032|   409: 'conflict', 422: 'unprocessable', 500: 'internal error', 502: 'bad gateway',
+00034| 00033|   503: 'unavailable',
+00035| 00034| };
+00036| 00035| 
+00037| 00036| async function request<T>(path: string, init?: RequestInit): Promise<T> {
+00038| 00037|   let res: Response;
+00039| 00038|   try {
+00040| 00039|     res = await fetch(BASE + path, { cache: 'no-store', ...init });
+00041| 00040|   } catch (e) {
+00042| 00041|     throw new ApiError(0, `network error — is the nexus server up? (${String(e)})`);
+00043| 00042|   }
+00044| 00043|   const text = await res.text();
+00045| 00044|   let body: unknown = null;
+00046| 00045|   if (text.length > 0) {
+00047| 00046|     try { body = JSON.parse(text); } catch { body = null; }
+00048| 00047|   }
+00049| 00048|   if (!res.ok) throw errFromBody(res.status, body);
+00050| 00049|   return body as T;
+00051| 00050| }
+00052| 00051| 
+00053| 00052| async function requestText(path: string): Promise<string> {
+00054| 00053|   let res: Response;
+00055| 00054|   try {
+00056| 00055|     res = await fetch(BASE + path, { cache: 'no-store' });
+00057| 00056|   } catch (e) {
+00058| 00057|     throw new ApiError(0, `network error — is the nexus server up? (${String(e)})`);
+00059| 00058|   }
+00060| 00059|   const text = await res.text();
+00061| 00060|   if (!res.ok) {
+00062| 00061|     let body: unknown = null;
+00063| 00062|     try { body = JSON.parse(text); } catch { body = null; }
+00064| 00063|     throw errFromBody(res.status, body);
+00065| 00064|   }
+00066| 00065|   return text;
+00067| 00066| }
+00068| 00067| 
+00069| 00068| function json(method: string, payload?: unknown): RequestInit {
+00070| 00069|   return {
+00071| 00070|     method,
+00072| 00071|     headers: { 'content-type': 'application/json' },
+00073| 00072|     body: payload === undefined ? undefined : JSON.stringify(payload),
+00074| 00073|   };
+00075| 00074| }
+00076| 00075| 
+00077| 00076| const enc = encodeURIComponent;
+00078| 00077| 
+00079| 00078| export interface NewEntityBody {
+00080| 00079|   etype: string;
+00081| 00080|   label: string;
+00082| 00081|   data?: Record<string, unknown>;
+00083| 00082|   confidence?: number;
+00084| 00083| }
+00085| 00084| 
+00086| 00085| export interface NewTaskBody {
+00087| 00086|   kind: string;
+00088| 00087|   target?: string | null;
+00089| 00088|   params?: Record<string, unknown>;
+00090| 00089| }
+00091| 00090| 
+00092| 00091| export const api = {
+00093| 00092|   // ---- health / admin -------------------------------------------------
+00094| 00093|   health(): Promise<Health> {
+00095| 00094|     return request<Health>('/health');
+00096| 00095|   },
+00097| 00096|   adminConfig(patch: Partial<NexusSettings>): Promise<Record<string, unknown>> {
+00098| 00097|     return request<Record<string, unknown>>('/admin/config', json('POST', patch));
+00099| 00098|   },
+00100| 00099| 
+00101| 00100|   // ---- cases -----------------------------------------------------------
+00102| 00101|   listCases(): Promise<Case[]> {
+00103| 00102|     return request<{ cases: Case[] }>('/cases').then((r) => r.cases);
+00104| 00103|   },
+00105| 00104|   createCase(body: { name: string; notes?: string; tags?: string[] }): Promise<Case> {
+00106| 00105|     return request<{ case: Case }>('/cases', json('POST', body)).then((r) => r.case);
+00107| 00106|   },
+00108| 00107|   getCase(id: string): Promise<{ case: Case; stats: Record<string, number> }> {
+00109| 00108|     return request<{ case: Case; stats: Record<string, number> }>(`/cases/${enc(id)}`);
+00110| 00109|   },
+00111| 00110|   patchCase(id: string, body: { status?: string; notes?: string }): Promise<Case> {
+00112| 00111|     return request<{ case: Case }>(`/cases/${enc(id)}`, json('PATCH', body)).then((r) => r.case);
+00113| 00112|   },
+00114| 00113|   deleteCase(id: string): Promise<{ ok: boolean }> {
+00115| 00114|     return request<{ ok: boolean }>(`/cases/${enc(id)}`, json('DELETE'));
+00116| 00115|   },
+00117| 00116|   getGraph(caseId: string): Promise<CaseGraph> {
+00118| 00117|     return request<CaseGraph>(`/cases/${enc(caseId)}/graph`);
+00119| 00118|   },
+00120| 00119|   getPath(caseId: string, a: string, b: string): Promise<{ path: string[] | null }> {
+00121| 00120|     return request<{ path: string[] | null }>(
+00122| 00121|       `/cases/${enc(caseId)}/path?a=${enc(a)}&b=${enc(b)}`,
+00123| 00122|     );
+00124| 00123|   },
+00125| 00124|   getPivots(caseId: string, entityId: string): Promise<{ pivots: PivotSuggestion[] }> {
+00126| 00125|     return request<{ pivots: PivotSuggestion[] }>(
+00127| 00126|       `/cases/${enc(caseId)}/pivots?entity=${enc(entityId)}`,
+00128| 00127|     );
+00129| 00128|   },
+00130| 00129| 
+00131| 00130|   // ---- entities --------------------------------------------------------
+00132| 00131|   addEntity(caseId: string, body: NewEntityBody): Promise<{ entity: Entity; deduplicated: boolean }> {
+00133| 00132|     return request<{ entity: Entity; deduplicated: boolean }>(
+00134| 00133|       `/cases/${enc(caseId)}/entities`, json('POST', body),
+00135| 00134|     );
+00136| 00135|   },
+00137| 00136|   getEntity(id: string): Promise<EntityDetail> {
+00138| 00137|     return request<EntityDetail>(`/entities/${enc(id)}`);
+00139| 00138|   },
+00140| 00139|   patchEntity(id: string, patch: {
+00141| 00140|     label?: string; data?: Record<string, unknown>; pinned?: boolean; confidence?: number;
+00142| 00141|   }): Promise<Entity> {
+00143| 00142|     return request<{ entity: Entity }>(`/entities/${enc(id)}`, json('PATCH', patch)).then((r) => r.entity);
+00144| 00143|   },
+00145| 00144|   deleteEntity(id: string): Promise<{ ok: boolean }> {
+00146| 00145|     return request<{ ok: boolean }>(`/entities/${enc(id)}`, json('DELETE'));
+00147| 00146|   },
+00148| 00147|   mergeEntity(id: string, other: string): Promise<Entity> {
+00149| 00148|     return request<{ entity: Entity }>(`/entities/${enc(id)}/merge`, json('POST', { other }))
+00150| 00149|       .then((r) => r.entity);
+00151| 00150|   },
+00152| 00151| 
+00153| 00152|   // ---- relations / evidence / timeline / docs ---------------------------
+00154| 00153|   addRelation(body: {
+00155| 00154|     case_id: string; src: string; dst: string; rel: string;
+00156| 00155|     weight?: number; confidence?: number; source?: string;
+00157| 00156|     evidence?: { title?: string; url?: string };
+00158| 00157|   }): Promise<Relation> {
+00159| 00158|     return request<{ relation: Relation }>('/relations', json('POST', body)).then((r) => r.relation);
+00160| 00159|   },
+00161| 00160|   deleteRelation(id: string): Promise<{ ok: boolean }> {
+00162| 00161|     return request<{ ok: boolean }>(`/relations/${enc(id)}`, json('DELETE'));
+00163| 00162|   },
+00164| 00163|   addEvidence(body: {
+00165| 00164|     case_id: string; subject: string; kind: string;
+00166| 00165|     title?: string; url?: string; snippet?: string;
+00167| 00166|     raw?: Record<string, unknown>; confidence?: number;
+00168| 00167|   }): Promise<Evidence> {
+00169| 00168|     return request<{ evidence: Evidence }>('/evidence', json('POST', body)).then((r) => r.evidence);
+00170| 00169|   },
+00171| 00170|   listEvidence(entityId: string): Promise<Evidence[]> {
+00172| 00171|     return request<{ evidence: Evidence[] }>(`/entities/${enc(entityId)}/evidence`).then((r) => r.evidence);
+00173| 00172|   },
+00174| 00173|   getTimeline(caseId: string): Promise<TimelineEvent[]> {
+00175| 00174|     return request<{ events: TimelineEvent[] }>(`/cases/${enc(caseId)}/timeline`).then((r) => r.events);
+00176| 00175|   },
+00177| 00176|   addTimelineEvent(caseId: string, body: {
+00178| 00177|     ts?: string; entity_id?: string | null; kind: string; title: string;
+00179| 00178|     detail?: Record<string, unknown>; source?: string;
+00180| 00179|   }): Promise<TimelineEvent> {
+00181| 00180|     return request<{ event: TimelineEvent }>(`/cases/${enc(caseId)}/timeline`, json('POST', body))
+00182| 00181|       .then((r) => r.event);
+00183| 00182|   },
+00184| 00183|   getDoc(entityId: string): Promise<string> {
+00185| 00184|     return request<{ doc: string }>(`/entities/${enc(entityId)}/doc`).then((r) => r.doc);
+00186| 00185|   },
+00187| 00186|   patchDoc(entityId: string, markdown: string): Promise<string> {
+00188| 00187|     return request<{ doc: string }>(`/entities/${enc(entityId)}/doc`, json('PATCH', { markdown }))
+00189| 00188|       .then((r) => r.doc);
+00190| 00189|   },
+00191| 00190|   renderDoc(entityId: string): Promise<string> {
+00192| 00191|     return request<{ doc: string }>(`/entities/${enc(entityId)}/doc/render`, json('POST'))
+00193| 00192|       .then((r) => r.doc);
+00194| 00193|   },
+00195| 00194| 
+00196| 00195|   // ---- tasks -----------------------------------------------------------
+00197| 00196|   createTask(caseId: string, body: NewTaskBody): Promise<Task> {
+00198| 00197|     return request<{ task: Task }>(`/cases/${enc(caseId)}/tasks`, json('POST', body), )
+00199| 00198|       .then((r) => r.task);
+00200| 00199|   },
+00201| 00200|   listTasks(caseId?: string): Promise<Task[]> {
+00202| 00201|     const q = caseId ? `?case_id=${enc(caseId)}` : '';
+00203| 00202|     return request<{ tasks: Task[] }>(`/tasks${q}`).then((r) => r.tasks);
+00204| 00203|   },
+00205| 00204|   getTask(id: string): Promise<Task> {
+00206| 00205|     return request<{ task: Task }>(`/tasks/${enc(id)}`).then((r) => r.task);
+00207| 00206|   },
+00208| 00207| 
+00209| 00208|   // ---- reports / interchange / laya / archon ----------------------------
+00210| 00209|   dossierMd(caseId: string): Promise<string> {
+00211| 00210|     return requestText(`/cases/${enc(caseId)}/dossier.md`);
+00212| 00211|   },
+00213| 00212|   briefMd(caseId: string): Promise<string> {
+00214| 00213|     return requestText(`/cases/${enc(caseId)}/brief.md`);
+00215| 00214|   },
+00216| 00215|   exportCase(caseId: string): Promise<unknown> {
+00217| 00216|     return request<unknown>(`/cases/${enc(caseId)}/export.json`);
+00218| 00217|   },
+00219| 00218|   importCase(exportShape: unknown): Promise<Case> {
+00220| 00219|     return request<{ case: Case }>('/cases/import', json('POST', exportShape)).then((r) => r.case);
+00221| 00220|   },
+00222| 00221|   layaTriage(caseId: string): Promise<{ ranked: LayaRanked[]; engine: string }> {
+00223| 00222|     return request<{ ranked: LayaRanked[]; engine: string }>('/laya/triage', json('POST', { case_id: caseId }));
+00224| 00223|   },
+00225| 00224|   archonStatus(): Promise<{ up: boolean; sandboxes: Array<Record<string, unknown>> }> {
+00226| 00225|     return request<{ up: boolean; sandboxes: Array<Record<string, unknown>> }>('/archon/status');
+00227| 00226|   },
+00228| 00227|   archonAsk(body: {
+00229| 00228|     question: string; case_id?: string; sandbox?: string; top_k?: number;
+00230| 00229|   }): Promise<{ ok: boolean; answer: string; citations: unknown[]; evidence: Evidence | null }> {
+00231| 00230|     return request<{ ok: boolean; answer: string; citations: unknown[]; evidence: Evidence | null }>(
+00232| 00231|       '/archon/ask', json('POST', body),
+00233| 00232|     );
+00234| 00233|   },
+00235| 00234|   archonPushCase(body: { case_id: string; sandbox?: string }): Promise<{ ok: boolean; sandbox: Record<string, unknown> | null }> {
+00236| 00235|     return request<{ ok: boolean; sandbox: Record<string, unknown> | null }>(
+00237| 00236|       '/archon/push_case', json('POST', body),
+00238| 00237|     );
+00239| 00238|   },
+00240| 00239| };
+00241| 00240| 
+00242| 
+00243| (End of file - total 240 lines)
+00244| </file>
+
+(End of file - total 244 lines)
+</file>

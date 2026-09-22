@@ -1,0 +1,21 @@
+{
+  "name": "nexus-webui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "NEXUS — qalarc investigation workbench (web UI)",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "cytoscape": "^3.30.4",
+    "cytoscape-fcose": "^2.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}

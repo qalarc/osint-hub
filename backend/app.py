@@ -185,6 +185,19 @@ async def stream_job(job_id: str):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
+@app.post("/api/jobs/{job_id}/grade", dependencies=[Depends(require_auth)])
+def grade_job_endpoint(job_id: str):
+    """Jev-grade every found item (verified/likely/weak/junk + confidence) and log
+    each decision to the Laya fine-tuning dataset (collect-while-working loop)."""
+    import grade as grader
+    job = manager.get(job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+    if job.status not in ("done", "error"):
+        raise HTTPException(409, "job still running — grade after completion")
+    return grader.grade_job(job)
+
+
 # frontend (served same-origin so the page works with no API base config)
 if FRONTEND_DIR.is_dir():
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

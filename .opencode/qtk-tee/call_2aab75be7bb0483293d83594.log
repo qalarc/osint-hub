@@ -1,0 +1,421 @@
+<file>
+00001| /**
+00002|  * NEXUS — qalarc investigation workbench. Orchestrator: builds the shell,
+00003|  * wires rail / graph / inspector / console / tabs / SSE, owns app state.
+00004|  */
+00005| import './style.css';
+00006| import { api, ApiError } from './api';
+00007| import { Console } from './console';
+00008| import { clear, debounce, emptyState, h, toast } from './dom';
+00009| import { GraphView, etypeColor, type LayoutName } from './graph';
+00010| import { Inspector } from './inspector';
+00011| import { Rail } from './rail';
+00012| import { loadSettings, openSettingsModal } from './settings';
+00013| import { EventLineStream } from './sse';
+00014| import { AnalysisPane, StoryPane, TimelinePane } from './tabs';
+00015| import type { BusEvent, Case, CaseGraph, NexusSettings } from './types';
+00016| 
+00017| type TabName = 'graph' | 'timeline' | 'analysis' | 'story';
+00018| 
+00019| function main(): void {
+00020|   let settings: NexusSettings = loadSettings();
+00021| 
+00022|   // ------------------------------------------------------------- state
+00023|   const state = {
+00024|     caseId: null as string | null,
+00025|     case: null as Case | null,
+00026|     graph: null as CaseGraph | null,
+00027|     tab: 'graph' as TabName,
+00028|     pathAnchor: null as string | null,
+00029|     hiddenEtypes: new Set<string>(),
+00030|     lastMiniTaskId: null as string | null,
+00031|   };
+00032| 
+00033|   // -------------------------------------------------------------- shell
+00034|   const appRoot = document.getElementById('app') as HTMLElement;
+00035| 
+00036|   const caseNameEl = h('span', { class: 'case-name-top mono', title: 'active case' }, '—');
+00037| 
+00038|   const tabsEl = new Map<TabName, HTMLElement>();
+00039|   const tabBar = h('nav', { class: 'tabs', role: 'tablist' });
+00040|   for (const t of ['graph', 'timeline', 'analysis', 'story'] as const) {
+00041|     const b = h('button', {
+00042|       class: 'tab', role: 'tab', type: 'button', dataset: { tab: t },
+00043|       onclick: () => setTab(t),
+00044|     }, t);
+00045|     tabsEl.set(t, b);
+00046|     tabBar.append(b);
+00047|   }
+00048| 
+00049|   const sseDot = h('span', { class: 'dot dot-off', id: 'sse-dot', title: 'event bus offline' });
+00050| 
+00051|   const gear = h('button', {
+00052|     class: 'btn btn-ghost', type: 'button', title: 'settings', 'aria-label': 'settings',
+00053|     onclick: () => {
+00054|       openSettingsModal(settings, (s) => {
+00055|         settings = s;
+00056|         void rail.refreshHealth();
+00057|       });
+00058|     },
+00059|   }, '⚙');
+00060| 
+00061|   const toggleLeft = h('button', {
+00062|     class: 'btn btn-ghost only-narrow', type: 'button', title: 'toggle cases rail',
+00063|     onclick: () => document.body.classList.toggle('show-left'),
+00064|   }, '▤');
+00065|   const toggleRight = h('button', {
+00066|     class: 'btn btn-ghost only-narrow', type: 'button', title: 'toggle inspector',
+00067|     onclick: () => document.body.classList.toggle('show-right'),
+00068|   }, '▨');
+00069| 
+00070|   const topbar = h('header', { id: 'topbar' },
+00071|     h('div', { class: 'brand' },
+00072|       h('span', { class: 'brand-mark mono' }, 'NEXUS ▚'),
+00073|       h('span', { class: 'brand-sub' }, 'qalarc investigation workbench'),
+00074|     ),
+00075|     h('div', { class: 'topbar-case' }, caseNameEl),
+00076|     tabBar,
+00077|     h('span', { class: 'flex-spacer' }),
+00078|     toggleLeft, toggleRight, sseDot, gear,
+00079|   );
+00080| 
+00081|   // graph toolbar
+00082|   const searchIn = h('input', {
+00083|     class: 'input input-sm toolbar-search', type: 'search',
+00084|     placeholder: 'filter by label…', 'aria-label': 'filter nodes by label',
+00085|   }) as HTMLInputElement;
+00086|   const chipsEl = h('div', { class: 'chips', role: 'group', 'aria-label': 'etype filters' });
+00087|   const pathBadge = h('span', { class: 'path-badge mono', hidden: true },
+00088|     '⇢ path',
+00089|     h('button', {
+00090|       class: 'btn btn-ghost btn-xs', type: 'button', title: 'clear path',
+00091|       onclick: () => clearPath(),
+00092|     }, '✕'),
+00093|   );
+00094|   const layoutGroup = h('div', { class: 'layout-group', role: 'group' });
+00095|   const layoutDefs: Array<[LayoutName, string, string]> = [
+00096|     ['fcose', 'force', 'fcose force layout'],
+00097|     ['grid', 'grid', 'grid layout'],
+00098|     ['circle', 'circle', 'circle layout'],
+00099|   ];
+00100|   for (const [name, label, title] of layoutDefs) {
+00101|     layoutGroup.append(h('button', {
+00102|       class: 'btn btn-sm layout-btn', type: 'button', dataset: { layout: name }, title,
+00103|       onclick: () => graph.runLayout(name),
+00104|     }, label));
+00105|   }
+00106|   layoutGroup.append(h('button', {
+00107|     class: 'btn btn-sm', type: 'button', title: 'fit view',
+00108|     onclick: () => graph.fit(),
+00109|   }, '⤢'));
+00110| 
+00111|   const cyContainer = h('div', { id: 'cy' });
+00112|   const graphEmpty = h('div', { class: 'graph-empty', hidden: true });
+00113|   const graphToolbar = h('div', { class: 'graph-toolbar' },
+00114|     searchIn, chipsEl, pathBadge, h('span', { class: 'flex-spacer' }), layoutGroup,
+00115|   );
+00116|   const paneGraph = h('section', { class: 'pane', id: 'pane-graph' },
+00117|     graphToolbar,
+00118|     h('div', { class: 'graph-wrap' }, cyContainer, graphEmpty),
+00119|   );
+00120|   const center = h('main', { id: 'center' }, paneGraph);
+00121|   const frame = h('div', { id: 'frame' });
+00122| 
+00123|   appRoot.append(topbar, frame);
+00124| 
+00125|   // ----------------------------------------------- components (closures are
+00126|   // lazy, so construction order below is safe; the cy container must be IN
+00127|   // THE DOM before GraphView exists — cytoscape's init runs a probe layout
+00128|   // that needs a non-zero container size)
+00129|   const rail = new Rail({
+00130|     selectCase: (id) => void selectCase(id),
+00131|     selectEntity: (id) => navigate(id),
+00132|     caseChanged: () => {
+00133|       const next = rail.activeCaseId;
+00134|       if (next) void selectCase(next);
+00135|       else {
+00136|         state.caseId = null;
+00137|         state.case = null;
+00138|         caseNameEl.textContent = '—';
+00139|         renderNoCase();
+00140|       }
+00141|     },
+00142|     graphDirty: () => scheduleGraphRefresh(),
+00143|     tasksChanged: () => consolePane.expand(state.lastMiniTaskId ?? ''),
+00144|     currentCaseId: () => state.caseId,
+00145|     currentEntities: () => graph.entities(),
+00146|   });
+00147| 
+00148|   const inspector = new Inspector({
+00149|     caseId: () => state.caseId,
+00150|     labelOf: (id) => graph.label(id),
+00151|     entities: () => graph.entities(),
+00152|     navigate: (id) => navigate(id),
+00153|     graphChanged: () => scheduleGraphRefresh(),
+00154|     taskStarted: (t) => consolePane.noteCreated(t),
+00155|   });
+00156| 
+00157|   const consolePane = new Console({
+00158|     caseId: () => state.caseId,
+00159|     entityLabel: (id) => (id ? graph.label(id) : null),
+00160|     onTasks: (tasks) => {
+00161|       state.lastMiniTaskId = tasks[0]?.id ?? null;
+00162|       rail.refreshTasks(tasks);
+00163|     },
+00164|   });
+00165| 
+00166|   const timeline = new TimelinePane({
+00167|     caseId: () => state.caseId,
+00168|     entities: () => graph.entities(),
+00169|     navigate: (id) => navigate(id),
+00170|   });
+00171| 
+00172|   const analysis = new AnalysisPane({
+00173|     caseId: () => state.caseId,
+00174|     entities: () => graph.entities(),
+00175|     labelOf: (id) => graph.label(id),
+00176|     navigate: (id) => navigate(id),
+00177|     taskStarted: (t) => consolePane.noteCreated(t),
+00178|   });
+00179| 
+00180|   const story = new StoryPane({
+00181|     caseId: () => state.caseId,
+00182|     case: () => state.case,
+00183|   });
+00184| 
+00185|   center.append(timeline.el, analysis.el, story.el);
+00186|   frame.append(rail.el, center, inspector.el);
+00187|   appRoot.append(consolePane.el);
+00188| 
+00189|   // container is attached now — safe to boot cytoscape
+00190|   const graph = new GraphView(cyContainer);
+00191| 
+00192|   // debug/automation handle (used by smoke tests + console poking)
+00193|   (window as unknown as Record<string, unknown>).__nexus = { graph, state };
+00194| 
+00195|   // ------------------------------------------------------------ app logic
+00196|   async function selectCase(id: string): Promise<void> {
+00197|     state.caseId = id;
+00198|     rail.setActive(id);
+00199|     clearPath();
+00200|     inspector.close();
+00201|     document.body.classList.remove('show-left');
+00202|     state.hiddenEtypes.clear();
+00203|     searchIn.value = '';
+00204|     await Promise.allSettled([
+00205|       fetchGraph(false),
+00206|       consolePane.refresh(id),
+00207|     ]);
+00208|     void timeline.refresh(id);
+00209|     try {
+00210|       const { case: c } = await api.getCase(id);
+00211|       state.case = c;
+00212|       caseNameEl.textContent = c.name;
+00213|     } catch { /* graph fetch surfaced errors already */ }
+00214|   }
+00215| 
+00216|   async function fetchGraph(relayout: boolean): Promise<void> {
+00217|     if (!state.caseId) return;
+00218|     const g = await api.getGraph(state.caseId);
+00219|     state.graph = g;
+00220|     graph.setGraph(g, { relayout });
+00221|     renderChips();
+00222|     analysis.refreshFromGraph(g);
+00223|     renderGraphEmpty(g.nodes.length === 0);
+00224|     if (inspector.isOpen) void inspector.refresh();
+00225|   }
+00226| 
+00227|   const scheduleGraphRefresh = debounce(() => {
+00228|     fetchGraph(false).catch((e) =>
+00229|       toast(e instanceof Error ? e.message : String(e), 'warn'));
+00230|   }, 700);
+00231| 
+00232|   function renderGraphEmpty(empty: boolean): void {
+00233|     clear(graphEmpty);
+00234|     if (!empty) { graphEmpty.hidden = true; return; }
+00235|     graphEmpty.hidden = false;
+00236|     graphEmpty.append(emptyState(
+00237|       'empty graph',
+00238|       'add entities from the left rail, or run a hub scan from an entity inspector',
+00239|     ));
+00240|   }
+00241| 
+00242|   function renderNoCase(): void {
+00243|     caseNameEl.textContent = '—';
+00244|     state.graph = null;
+00245|     graph.setGraph(
+00246|       { nodes: [], edges: [], analysis: { degree: {}, pagerank: {}, communities: {}, components: [] } },
+00247|       { relayout: true },
+00248|     );
+00249|     renderChips();
+00250|     graphEmpty.hidden = false;
+00251|     clear(graphEmpty);
+00252|     graphEmpty.append(emptyState('no case selected', 'create a case in the left rail to begin'));
+00253|     analysis.refreshFromGraph({ nodes: [], edges: [], analysis: { degree: {}, pagerank: {}, communities: {}, components: [] } });
+00254|   }
+00255| 
+00256|   function navigate(entityId: string): void {
+00257|     if (!graph.entity(entityId)) {
+00258|       toast('entity not on this graph', 'warn');
+00259|       return;
+00260|     }
+00261|     inspector.open(entityId);
+00262|     graph.focus(entityId);
+00263|     if (!document.body.classList.contains('show-right') && window.innerWidth <= 1100) {
+00264|       document.body.classList.add('show-right');
+00265|     }
+00266|   }
+00267| 
+00268|   function clearPath(): void {
+00269|     state.pathAnchor = null;
+00270|     graph.setAnchor(null);
+00271|     graph.highlightPath(null);
+00272|     pathBadge.hidden = true;
+00273|   }
+00274| 
+00275|   async function shiftPathTo(id: string): Promise<void> {
+00276|     if (!state.pathAnchor) {
+00277|       state.pathAnchor = id;
+00278|       graph.setAnchor(id);
+00279|       toast('path anchor set — shift-click a second node', 'info', 2500);
+00280|       return;
+00281|     }
+00282|     const a = state.pathAnchor;
+00283|     state.pathAnchor = null;
+00284|     graph.setAnchor(null);
+00285|     if (a === id) return;
+00286|     if (!state.caseId) return;
+00287|     try {
+00288|       const { path } = await api.getPath(state.caseId, a, id);
+00289|       if (path && path.length > 0) {
+00290|         graph.highlightPath(path);
+00291|         pathBadge.hidden = false;
+00292|         toast(`path found: ${path.length} node${path.length === 1 ? '' : 's'}`, 'ok', 2500);
+00293|       } else {
+00294|         graph.highlightPath(null);
+00295|         pathBadge.hidden = true;
+00296|         toast('no path between those nodes', 'warn');
+00297|       }
+00298|     } catch (e) {
+00299|       toast(e instanceof Error ? e.message : String(e), 'error');
+00300|     }
+00301|   }
+00302| 
+00303|   function renderChips(): void {
+00304|     clear(chipsEl);
+00305|     for (const t of graph.etypes()) {
+00306|       const on = !state.hiddenEtypes.has(t);
+00307|       chipsEl.append(h('button', {
+00308|         class: `chip chip-filter${on ? '' : ' off'}`, type: 'button',
+00309|         title: `${on ? 'hide' : 'show'} ${t}`,
+00310|         onclick: () => {
+00311|           if (state.hiddenEtypes.has(t)) state.hiddenEtypes.delete(t);
+00312|           else state.hiddenEtypes.add(t);
+00313|           renderChips();
+00314|           applyFilters();
+00315|         },
+00316|       },
+00317|         h('span', { class: 'dot dot-inline', style: `background:${etypeColor(t)}` }),
+00318|         t,
+00319|       ));
+00320|     }
+00321|   }
+00322| 
+00323|   function applyFilters(): void {
+00324|     graph.setFilters(searchIn.value, state.hiddenEtypes);
+00325|   }
+00326| 
+00327|   function onBusEvent(ev: BusEvent): void {
+00328|     switch (ev.type) {
+00329|       case 'entity_added':
+00330|       case 'case_updated':
+00331|         if (ev.case_id && state.caseId && ev.case_id === state.caseId) scheduleGraphRefresh();
+00332|         if (ev.type === 'case_updated') void rail.refreshCases();
+00333|         break;
+00334|       case 'task_update':
+00335|         void consolePane.refresh();
+00336|         break;
+00337|       default:
+00338|         break;
+00339|     }
+00340|   }
+00341| 
+00342|   // --------------------------------------------------------------- wiring
+00343|   searchIn.addEventListener('input', applyFilters);
+00344| 
+00345|   graph.cy.on('tap', 'node', (evt) => {
+00346|     const id = evt.target.id();
+00347|     const orig = evt.originalEvent as MouseEvent | undefined;
+00348|     if (orig?.shiftKey) { void shiftPathTo(id); return; }
+00349|     clearPath();
+00350|     navigate(id);
+00351|   });
+00352| 
+00353|   graph.cy.on('tap', (evt) => {
+00354|     if (evt.target === graph.cy) {
+00355|       clearPath();
+00356|       inspector.close();
+00357|     }
+00358|   });
+00359| 
+00360|   window.addEventListener('keydown', (e) => {
+00361|     if (e.key !== 'Escape') return;
+00362|     if (document.querySelector('.modal-backdrop')) return; // modal handles itself
+00363|     if (state.pathAnchor || !pathBadge.hidden) { clearPath(); return; }
+00364|     if (inspector.isOpen) inspector.close();
+00365|   });
+00366| 
+00367|   const bus = new EventLineStream('/api/events', (ev) => onBusEvent(ev), (connected) => {
+00368|     sseDot.classList.toggle('dot-up', connected);
+00369|     sseDot.classList.toggle('dot-off', !connected);
+00370|     sseDot.title = connected ? 'event bus connected' : 'event bus offline (retrying)';
+00371|   });
+00372|   bus.start();
+00373| 
+00374|   function setTab(tab: TabName): void {
+00375|     state.tab = tab;
+00376|     for (const [name, btn] of tabsEl) {
+00377|       btn.classList.toggle('active', name === tab);
+00378|       btn.setAttribute('aria-selected', String(name === tab));
+00379|     }
+00380|     const paneIds: Record<TabName, string> = {
+00381|       graph: 'pane-graph', timeline: 'pane-timeline',
+00382|       analysis: 'pane-analysis', story: 'pane-story',
+00383|     };
+00384|     for (const pid of Object.values(paneIds)) {
+00385|       const el = document.getElementById(pid);
+00386|       if (el) el.hidden = pid !== paneIds[tab];
+00387|     }
+00388|     if (tab === 'timeline') void timeline.refresh();
+00389|     if (tab === 'story') void story.refresh();
+00390|     if (tab === 'analysis' && state.graph) analysis.refreshFromGraph(state.graph);
+00391|     if (tab === 'graph') graph.fit();
+00392|   }
+00393| 
+00394|   // ----------------------------------------------------------------- boot
+00395|   async function boot(): Promise<void> {
+00396|     window.setInterval(() => void consolePane.refresh(), 15000);
+00397|     try {
+00398|       await rail.refreshHealth();
+00399|     } catch { /* rendered as down */ }
+00400|     try {
+00401|       await rail.refreshCases();
+00402|       const first = rail.activeCaseId;
+00403|       if (first) await selectCase(first);
+00404|       else renderNoCase();
+00405|     } catch (e) {
+00406|       renderNoCase();
+00407|       toast(e instanceof ApiError ? e.message : String(e), 'warn');
+00408|     }
+00409|     void consolePane.refresh();
+00410|   }
+00411| 
+00412|   void boot();
+00413|   setTab('graph');
+00414| }
+00415| 
+00416| main();
+00417| 
+
+(End of file - total 417 lines)
+</file>

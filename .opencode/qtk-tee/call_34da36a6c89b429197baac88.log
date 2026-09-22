@@ -1,0 +1,398 @@
+<file>
+00001| /* ============================================================================
+00002|    qalarc · OSINT Hub — LITE cloud API (Cloudflare Pages Function)
+00003|    Route file: functions/api/[[path]].js  →  serves same-origin /api/*
+00004| 
+00005|    WHY THIS EXISTS
+00006|    ---------------
+00007|    The full engine is a FastAPI backend running maigret / holehe / phoneinfoga
+00008|    as local subprocesses — impossible on Pages. This Function provides a
+00009|    zero-server subset ("lite") so the deployed static frontend stays useful:
+00010| 
+00011|      GET  /api/health      → lite health marker (mode:"lite")
+00012|      GET  /api/tools       → the two lite tools
+00013|      POST /api/lite/check  → synchronous edge username scan (~44 platforms)
+00014|      POST /api/lite/pivots → instant Google-dork pivots for a phone number
+00015|      *    /api/*           → 501 (full engine not available in lite mode)
+00016| 
+00017|    FREE-PLAN SUBREQUEST BUDGET (the design constraint)
+00018|    --------------------------------------------------
+00019|    Workers/Pages Functions on the Cloudflare FREE plan allow **50 subrequests
+00020|    per incoming request**. Every external fetch() counts as one subrequest —
+00021|    and a redirect chain counts once PER HOP. Therefore:
+00022| 
+00023|      • every probe uses redirect:"manual" → exactly ONE subrequest per site,
+00024|        no matter how the target would redirect;
+00025|      • the site list is hard-capped at 44 entries (44 < 50, leaving headroom);
+00026|      • probes run in chunks of 10 concurrent fetches (Promise.allSettled) to
+00027|        stay polite and inside CPU limits (free plan: 10 ms CPU/request —
+00028|        awaiting fetches does not consume CPU);
+00029|      • each fetch is bounded by AbortSignal.timeout(8000) so a hanging host
+00030|        cannot stall the whole request;
+00031|      • no redirect is followed, so per-site detection works from the immediate
+00032|        status code + Location header (see SITES below).
+00033| 
+00034|    DETECTION RULES (conservative by design — verified empirically 2026-09)
+00035|    -----------------------------------------------------------------------
+00036|    Sites were probed with a known-existing and a known-missing username:
+00037|    only platforms whose missing-profile response is reliably distinguishable
+00038|    are included. Unreliable platforms that answer HTTP 200 for *any* username
+00039|    (instagram, tiktok, twitch, spotify, pinterest, kaggle, pypi, mixcloud,
+00040|    imgur, dailymotion, artstation, 500px, slideshare …) are deliberately
+00041|    OMITTED — a false "found" is worse than a missing row.
+00042|    Rule kinds (per site):
+00043|      status    (default) found ⇔ 2xx            (missing ⇒ 404/403/redirect)
+00044|      redirUser             found ⇔ 2xx, or 3xx whose Location still contains
+00045|                            the username (canonicalisation redirect; missing is
+00046|                            a plain 404 on these sites)
+00047|      roblox                special: 3xx whose Location is NOT the
+00048|                            "request-error" page (missing users bounce there)
+00049|      sniff                 2xx AND cheap body markers (tiny JSON pages or the
+00050|                            steam error string; body reads skipped if huge)
+00051| 
+00052|    No state, no KV, no analytics. A best-effort in-memory per-IP rate limiter
+00053|    (30/hour) lives only for the isolate's lifetime — best effort, not a
+00054|    guarantee. Plain JS, no build step, no external packages.
+00055| ============================================================================ */
+00056| 
+00057| const VERSION = 'lite-1.0.0';
+00058| const PROBE_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 OSINT-Hub-Lite/1.0';
+00059| const FETCH_TIMEOUT_MS = 8000;
+00060| const CHUNK_SIZE = 10;
+00061| const RATE_LIMIT = 30;              /* lite POSTs per hour per IP */
+00062| const RATE_WINDOW_MS = 60 * 60 * 1000;
+00063| 
+00064| /* ------------------------------------------------------------------ tools */
+00065| 
+00066| const HEALTH = {
+00067|   ok: true,
+00068|   version: VERSION,
+00069|   tools_installed: 2,
+00070|   auth_required: false,
+00071|   mode: 'lite'
+00072| };
+00073| 
+00074| const TOOLS = {
+00075|   tools: [
+00076|     {
+00077|       id: 'cloudcheck',
+00078|       name: 'CloudCheck (lite)',
+00079|       kind: 'username',
+00080|       installed: true,
+00081|       description: 'Edge username check across ~40 top platforms (sherlock-style, Cloudflare-native).',
+00082|       hint: 'always available on Pages'
+00083|     },
+00084|     {
+00085|       id: 'pivots',
+00086|       name: 'Search Pivots',
+00087|       kind: 'phone',
+00088|       installed: true,
+00089|       description: 'Instant Google-dork pivot generation for a phone number.',
+00090|       hint: 'always available on Pages'
+00091|     }
+00092|   ]
+00093| };
+00094| 
+00095| /* ------------------------------------------------------------------ sites
+00096|    u = validated username. "probe" = (existing → code, missing → code).
+00097|    List length MUST stay ≤ 45 (free-plan subrequest budget: 50/request).   */
+00098| 
+00099| const SITES = [
+00100|   /* --- big social / content platforms --- */
+00101|   { site: 'GitHub',            url: u => 'https://github.com/' + u },                        /* probe: 200/404 */
+00102|   { site: 'GitHub Gist',       url: u => 'https://gist.github.com/' + u },                   /* probe: 200/404 */
+00103|   { site: 'GitHub Pages',      url: u => 'https://' + u + '.github.io/' },                   /* probe: 200/404 */
+00104|   { site: 'GitLab',            url: u => 'https://gitlab.com/' + u },                        /* probe: 200/302→login (missing) */
+00105|   { site: 'X (Twitter)',       url: u => 'https://x.com/' + u },                             /* probe: 200/404 */
+00106|   { site: 'YouTube',           url: u => 'https://www.youtube.com/@' + u },                  /* probe: 200/404 */
+00107|   { site: 'Medium',            url: u => 'https://medium.com/@' + u },                       /* probe: 200/403 (missing) */
+00108|   { site: 'Dev.to',            url: u => 'https://dev.to/' + u },                            /* probe: 200/404 */
+00109|   { site: 'DeviantArt',        url: u => 'https://www.deviantart.com/' + u },                /* probe: 200/404 */
+00110|   { site: 'Behance',           url: u => 'https://www.behance.net/' + u },                   /* probe: 200/404 */
+00111|   { site: 'Dribbble',          url: u => 'https://dribbble.com/' + u,            rule: 'redirUser' }, /* 200|302→/{u}/about, missing 404 */
+00112|   { site: 'Flickr',            url: u => 'https://www.flickr.com/people/' + u },             /* probe: 200/404 */
+00113|   { site: 'Vimeo',             url: u => 'https://vimeo.com/' + u },                         /* probe: 200/404 */
+00114|   { site: 'SoundCloud',        url: u => 'https://soundcloud.com/' + u },                    /* probe: 200/404 */
+00115|   { site: 'Last.fm',           url: u => 'https://www.last.fm/user/' + u },                  /* probe: 200/404 */
+00116|   { site: 'Tumblr',            url: u => 'https://' + u + '.tumblr.com/' },                  /* probe: 200/404 */
+00117|   { site: 'Steam',             url: u => 'https://steamcommunity.com/id/' + u,
+00118|     sniff: { absent: ['could not be found'] } },                       /* 200 always; missing body carries the error string */
+00119|   { site: 'Telegram',          url: u => 'https://t.me/' + u,
+00120|     sniff: { present: ['tgme_page_title'] } },                         /* 200 always; real preview pages embed the title div */
+00121|   { site: 'Mastodon',          url: u => 'https://mastodon.social/@' + u },                  /* probe: 200/404 */
+00122|   { site: 'Substack',          url: u => 'https://' + u + '.substack.com/' },                /* probe: 200/404 */
+00123| 
+00124|   /* --- link-in-bio / monetization --- */
+00125|   { site: 'Linktree',          url: u => 'https://linktr.ee/' + u },                         /* probe: 200/404 */
+00126|   { site: 'Patreon',           url: u => 'https://www.patreon.com/' + u,          rule: 'redirUser' }, /* 200|308→/{u}, missing 404 */
+00127|   { site: 'Gumroad',           url: u => 'https://gumroad.com/' + u,             rule: 'redirUser' }, /* 200|301→/{u}, missing 404 */
+00128|   /* --- gaming --- */
+00129|   /* NB: omitted on purpose (unverifiable via status codes): instagram,
+00130|      tiktok, twitch, spotify, pinterest — all answer 200 for missing profiles. */
+00131|   { site: 'Roblox',            url: u => 'https://www.roblox.com/users/profile?username=' + u,
+00132|     rule: 'roblox' },                                                  /* 302→/users/{id}/profile, missing 302→request-error */
+00133|   { site: 'Minecraft',         url: u => 'https://api.mojang.com/users/profiles/minecraft/' + u }, /* API: 200/404 */
+00134| 
+00135|   /* --- dev / code --- */
+00136|   { site: 'Replit',            url: u => 'https://replit.com/@' + u,             rule: 'redirUser' }, /* 302→…goto=%2F@{u}, missing 404 */
+00137|   { site: 'HackerRank',        url: u => 'https://www.hackerrank.com/profile/' + u },        /* probe: 200/302 (missing) */
+00138|   { site: 'Codewars',          url: u => 'https://www.codewars.com/users/' + u },            /* probe: 200/404 */
+00139|   { site: 'Docker Hub',        url: u => 'https://hub.docker.com/v2/users/' + u + '/' },     /* API: 200/404 */
+00140|   { site: 'RubyGems',          url: u => 'https://rubygems.org/profiles/' + u },             /* probe: 200/404 */
+00141|   { site: 'Hacker News',       url: u => 'https://news.ycombinator.com/user?id=' + u,
+00142|     sniff: { absent: ['No such user'] } },                             /* 200 always; tiny page, cheap sniff */
+00143| 
+00144|   /* --- forums / wikis / Q&A --- */
+00145|   { site: 'Wikipedia',         url: u => 'https://en.wikipedia.org/w/api.php?action=query&list=users&ususers=' + u + '&format=json',
+00146|     sniff: { absent: ['"missing"'] } },                                /* API: tiny JSON, missing users get "missing":"" */
+00147|   { site: 'Keybase',           url: u => 'https://keybase.io/_/api/1.0/user/lookup.json?username=' + u,
+00148|     sniff: { present: ['"them":{'] } },                                /* API: tiny JSON, missing → them:null */
+00149| 
+00150|   /* --- niche communities --- */
+00151|   { site: 'Chess.com',         url: u => 'https://api.chess.com/pub/player/' + u },          /* API: 200/404 */
+00152|   { site: 'Lichess',           url: u => 'https://lichess.org/api/user/' + u },              /* API: 200/404 */
+00153|   { site: '9GAG',              url: u => 'https://9gag.com/u/' + u },                       /* probe: 200/404 */
+00154|   { site: 'Letterboxd',        url: u => 'https://letterboxd.com/' + u + '/' },              /* probe: 200/404 */
+00155|   { site: 'MyAnimeList',       url: u => 'https://myanimelist.net/profile/' + u },           /* probe: 200/404 */
+00156|   { site: 'Redbubble',         url: u => 'https://www.redbubble.com/people/' + u + '/shop' }, /* probe: 200/404 */
+00157|   { site: 'Speaker Deck',      url: u => 'https://speakerdeck.com/' + u },                   /* probe: 200/404 */
+00158|   { site: 'Goodreads',         url: u => 'https://www.goodreads.com/' + u,         rule: 'redirUser' }, /* 301→/user/show/…-{u}…, missing 404 */
+00159|   { site: 'Disqus',            url: u => 'https://disqus.com/by/' + u + '/',      rule: 'redirUser' }, /* 302→canonical, missing 404 */
+00160|   { site: 'OpenStreetMap',     url: u => 'https://www.openstreetmap.org/user/' + u }         /* probe: 200/404 */
+00161| ];
+00162| 
+00163| /* ------------------------------------------------------- phone pivots ---- */
+00164| 
+00165| /* +CC → country guess (longest-prefix match). Small by design. */
+00166| const CC_TABLE = {
+00167|   '1': 'US/CA', '7': 'RU/KZ', '20': 'EG', '27': 'ZA', '30': 'GR', '31': 'NL',
+00168|   '32': 'BE', '33': 'FR', '34': 'ES', '36': 'HU', '39': 'IT', '40': 'RO',
+00169|   '41': 'CH', '43': 'AT', '44': 'UK', '45': 'DK', '46': 'SE', '47': 'NO',
+00170|   '48': 'PL', '49': 'DE', '52': 'MX', '55': 'BR', '61': 'AU', '62': 'ID',
+00171|   '63': 'PH', '64': 'NZ', '66': 'TH', '81': 'JP', '82': 'KR', '84': 'VN',
+00172|   '86': 'CN', '90': 'TR', '91': 'IN', '92': 'PK', '94': 'LK', '98': 'IR',
+00173|   '212': 'MA', '234': 'NG', '254': 'KE', '351': 'PT', '353': 'IE',
+00174|   '354': 'IS', '358': 'FI', '370': 'LT', '371': 'LV', '372': 'EE',
+00175|   '375': 'BY', '380': 'UA', '971': 'AE', '966': 'SA', '972': 'IL', '995': 'GE'
+00176| };
+00177| 
+00178| /* Disposable / public-SMS receiver sites — numbers appearing here have been
+00179|    used for throwaway verification. Searched via Google site: dorks. */
+00180| const DISPOSABLE_SITES = [
+00181|   'receive-sms.com', 'receive-smsonline.com', 'sms-online.co', 'smstome.com',
+00182|   'smsreceivefree.com', 'receive-a-sms.com', 'receivefreesms.com'
+00183| ];
+00184| 
+00185| function googleDork(query) {
+00186|   return 'https://www.google.com/search?q=' + encodeURIComponent(query);
+00187| }
+00188| 
+00189| /* ------------------------------------------------------- rate limiting --- */
+00190| 
+00191| const rateMap = new Map(); /* ip → [timestamps] (isolate-lifetime, best effort) */
+00192| 
+00193| function rateAllow(key) {
+00194|   const now = Date.now();
+00195|   let hits = rateMap.get(key);
+00196|   if (!hits) { hits = []; rateMap.set(key, hits); }
+00197|   while (hits.length && hits[0] <= now - RATE_WINDOW_MS) hits.shift();
+00198|   if (hits.length >= RATE_LIMIT) return false;
+00199|   hits.push(now);
+00200|   if (rateMap.size > 10000) {
+00201|     for (const [k, v] of rateMap) {
+00202|       if (!v.length || v[v.length - 1] <= now - RATE_WINDOW_MS) rateMap.delete(k);
+00203|     }
+00204|   }
+00205|   return true;
+00206| }
+00207| 
+00208| /* ------------------------------------------------------------- helpers --- */
+00209| 
+00210| function corsHeaders() {
+00211|   return {
+00212|     'Access-Control-Allow-Origin': '*',
+00213|     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+00214|     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+00215|     'Access-Control-Max-Age': '86400'
+00216|   };
+00217| }
+00218| 
+00219| function json(status, obj) {
+00220|   const headers = corsHeaders();
+00221|   headers['Content-Type'] = 'application/json; charset=utf-8';
+00222|   headers['Cache-Control'] = 'no-store';
+00223|   return new Response(JSON.stringify(obj), { status: status, headers: headers });
+00224| }
+00225| 
+00226| async function readJsonBody(request) {
+00227|   try { return await request.json(); } catch (_) { return null; }
+00228| }
+00229| 
+00230| function clientIp(request) {
+00231|   return request.headers.get('CF-Connecting-IP') || 'anon';
+00232| }
+00233| 
+00234| /* Does a redirect Location still point at the username? Tokens cover the
+00235|    canonical patterns seen in the wild (/u, @u, -u, =u + urlencoded forms).
+00236|    NB: very short usernames can substring-collide — acceptable for a heuristic
+00237|    tool and far safer than treating every 3xx as "found". */
+00238| function locationKeepsUser(loc, user) {
+00239|   const l = loc.toLowerCase();
+00240|   const u = user.toLowerCase();
+00241|   return ['/' + u, '@' + u, '-' + u, '=' + u, '%40' + u, '%2f' + u]
+00242|     .some(t => l.includes(t));
+00243| }
+00244| 
+00245| /* Probe one site. Returns a found-item or null. One subrequest per call. */
+00246| async function probeSite(def, user) {
+00247|   const url = def.url(user);
+00248|   let res;
+00249|   try {
+00250|     res = await fetch(url, {
+00251|       method: 'GET',
+00252|       redirect: 'manual',                 /* exactly 1 subrequest, no hop chain */
+00253|       headers: { 'User-Agent': PROBE_UA, 'Accept': 'text/html,application/json' },
+00254|       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+00255|     });
+00256|   } catch (_) {
+00257|     return null;                          /* timeout / network error → not found */
+00258|   }
+00259| 
+00260|   const status = res.status;
+00261|   if (status >= 200 && status < 300) {
+00262|     if (def.sniff) {
+00263|       const len = Number(res.headers.get('content-length') || 0);
+00264|       if (len > 3000000) return null;     /* huge body → skip, stay conservative */
+00265|       let body = '';
+00266|       try { body = await res.text(); } catch (_) { return null; }
+00267|       if (def.sniff.absent && def.sniff.absent.some(m => body.includes(m))) return null;
+00268|       if (def.sniff.present && !def.sniff.present.every(m => body.includes(m))) return null;
+00269|     }
+00270|     return { site: def.site, url: url, http_status: status };
+00271|   }
+00272| 
+00273|   if (status >= 300 && status < 400) {
+00274|     const loc = res.headers.get('location') || '';
+00275|     if (!loc) return null;
+00276|     if (def.rule === 'redirUser' && locationKeepsUser(loc, user)) {
+00277|       return { site: def.site, url: url, http_status: status };
+00278|     }
+00279|     if (def.rule === 'roblox' && !/request-error/i.test(loc)) {
+00280|       return { site: def.site, url: url, http_status: status };
+00281|     }
+00282|   }
+00283| 
+00284|   return null;                            /* 4xx/5xx/unmatched 3xx → not found */
+00285| }
+00286| 
+00287| /* --------------------------------------------------------- endpoints ----- */
+00288| 
+00289| async function liteCheck(request) {
+00290|   if (!rateAllow(clientIp(request))) {
+00291|     return json(429, { error: 'rate limited: lite cloud mode allows ' + RATE_LIMIT + ' scans/hour per IP' });
+00292|   }
+00293|   const body = await readJsonBody(request);
+00294|   if (!body || typeof body.value !== 'string') {
+00295|     return json(400, { error: 'expected JSON body {"value":"<username>"}' });
+00296|   }
+00297|   const user = body.value.trim().replace(/^@+/, '');
+00298|   if (!/^[A-Za-z0-9._-]{1,64}$/.test(user)) {
+00299|     return json(400, { error: 'invalid username (allowed: A-Z a-z 0-9 . _ - , max 64 chars)' });
+00300|   }
+00301| 
+00302|   const found = [];
+00303|   /* chunked concurrency — see subrequest-budget notes in the header */
+00304|   for (let i = 0; i < SITES.length; i += CHUNK_SIZE) {
+00305|     const chunk = SITES.slice(i, i + CHUNK_SIZE);
+00306|     const settled = await Promise.allSettled(chunk.map(s => probeSite(s, user)));
+00307|     for (const r of settled) {
+00308|       if (r.status === 'fulfilled' && r.value) found.push(r.value);
+00309|     }
+00310|   }
+00311|   return json(200, { found: found });
+00312| }
+00313| 
+00314| function litePivots(request) {
+00315|   if (!rateAllow(clientIp(request))) {
+00316|     return json(429, { error: 'rate limited: lite cloud mode allows ' + RATE_LIMIT + ' scans/hour per IP' });
+00317|   }
+00318|   return readJsonBody(request).then(body => {
+00319|     if (!body || typeof body.value !== 'string') {
+00320|       return json(400, { error: 'expected JSON body {"value":"+61425228338"}' });
+00321|     }
+00322|     const raw = body.value.trim();
+00323|     const digits = raw.replace(/\D/g, '');
+00324|     if (digits.length < 7 || digits.length > 15) {
+00325|       return json(400, { error: 'invalid phone number (expected E.164-ish, 7-15 digits)' });
+00326|     }
+00327|     const e164 = '+' + digits;
+00328| 
+00329|     /* country guess — longest prefix first */
+00330|     let country = null;
+00331|     for (let len = 3; len >= 1; len--) {
+00332|       const cc = digits.slice(0, len);
+00333|       if (CC_TABLE[cc]) { country = CC_TABLE[cc]; break; }
+00334|     }
+00335| 
+00336|     const info = [];
+00337|     info.push({ key: 'Country (guessed)', value: country || 'unknown' });
+00338|     info.push({ key: 'E.164', value: e164 });
+00339|     info.push({ key: 'Digits', value: String(digits.length) });
+00340| 
+00341|     const d = '"' + digits + '"';
+00342|     info.push({ key: 'Google — exact match', url: googleDork(d) });
+00343|     info.push({ key: 'Social media (Facebook)', url: googleDork('site:facebook.com ' + d) });
+00344|     info.push({ key: 'Social media (X/Twitter)', url: googleDork('site:twitter.com ' + d) });
+00345|     info.push({ key: 'Social media (LinkedIn)', url: googleDork('site:linkedin.com ' + d) });
+00346|     info.push({ key: 'Social media (Instagram)', url: googleDork('site:instagram.com ' + d) });
+00347|     info.push({ key: 'Social media (VK)', url: googleDork('site:vk.com ' + d) });
+00348|     info.push({ key: 'Reddit', url: googleDork('site:reddit.com ' + d) });
+00349|     info.push({ key: 'WhatsApp — open chat', url: 'https://wa.me/' + digits });
+00350|     DISPOSABLE_SITES.forEach(s => {
+00351|       info.push({ key: 'Disposable SMS — ' + s, url: googleDork('site:' + s + ' ' + d) });
+00352|     });
+00353|     info.push({ key: 'DuckDuckGo — exact match', url: 'https://duckduckgo.com/?q=' + encodeURIComponent(d) });
+00354|     info.push({ key: 'Bing — exact match', url: 'https://www.bing.com/search?q=' + encodeURIComponent(d) });
+00355| 
+00356|     return json(200, { info: info });
+00357|   });
+00358| }
+00359| 
+00360| /* ------------------------------------------------------------- routing --- */
+00361| 
+00362| export async function onRequest(context) {
+00363|   const request = context.request;
+00364|   const url = new URL(request.url);
+00365|   /* prefix-agnostic routing: works at the root of a dedicated Pages project
+00366|      (/api/...) AND scoped inside the qalarc.com site (/projects/osint-hub/api/...) */
+00367|   const _i = url.pathname.indexOf('/api/');
+00368|   const path = ((_i >= 0 ? url.pathname.slice(_i) : url.pathname) || '/').replace(/\/+$/, '') || '/';
+00369|   const method = request.method.toUpperCase();
+00370| 
+00371|   if (method === 'OPTIONS') {
+00372|     return new Response(null, { status: 204, headers: corsHeaders() });
+00373|   }
+00374| 
+00375|   if (path === '/api/health' && method === 'GET') {
+00376|     return json(200, HEALTH);
+00377|   }
+00378|   if (path === '/api/tools' && method === 'GET') {
+00379|     return json(200, TOOLS);
+00380|   }
+00381|   if (path === '/api/lite/check' && method === 'POST') {
+00382|     return liteCheck(request);
+00383|   }
+00384|   if (path === '/api/lite/pivots' && method === 'POST') {
+00385|     return litePivots(request);
+00386|   }
+00387| 
+00388|   /* everything else — /api/scan, /api/jobs/*, wrong methods, bare /api —
+00389|      the full engine simply is not here. */
+00390|   return json(501, {
+00391|     error: 'full engine not available in lite mode — run the FastAPI backend for maigret/holehe/phoneinfoga'
+00392|   });
+00393| }
+00394| 
+
+(End of file - total 394 lines)
+</file>

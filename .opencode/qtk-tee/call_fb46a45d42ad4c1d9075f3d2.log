@@ -1,0 +1,474 @@
+<file>
+00001| /**
+00002|  * Right inspector drawer: entity fields, data JSON, relations, evidence,
+00003|  * wiki doc editor, connector actions, pivots, merge, delete.
+00004|  */
+00005| import { api } from './api';
+00006| import {
+00007|   clear, emptyState, fmtTs, guarded, h, inputModal, toast, truncate,
+00008| } from './dom';
+00009| import { etypeColor } from './graph';
+00010| import {
+00011|   type Entity, type EntityDetail, type PivotSuggestion, type Relation, type Task,
+00012| } from './types';
+00013| 
+00014| export interface InspectorCallbacks {
+00015|   caseId(): string | null;
+00016|   labelOf(id: string): string;
+00017|   entities(): Entity[];
+00018|   navigate(entityId: string): void;
+00019|   graphChanged(): void;
+00020|   taskStarted(task: Task): void;
+00021| }
+00022| 
+00023| /** hub_scan kind for an entity's etype */
+00024| function scanKindFor(etype: string): string {
+00025|   if (etype === 'email') return 'email';
+00026|   if (etype === 'phone') return 'phone';
+00027|   if (etype === 'image') return 'image';
+00028|   return 'username'; // username / alias / person / fallback
+00029| }
+00030| 
+00031| /** flowsint enrichers suggested by etype */
+00032| function enrichersFor(etype: string): string[] {
+00033|   switch (etype) {
+00034|     case 'domain':
+00035|     case 'subdomain':
+00036|       return ['subdomain_discovery', 'dns_lookup', 'whois_lookup'];
+00037|     case 'ip':
+00038|       return ['reverse_dns', 'geoip', 'ports'];
+00039|     case 'website':
+00040|       return ['http_headers', 'tech_stack'];
+00041|     case 'email':
+00042|       return ['breach_check', 'gravatar'];
+00043|     case 'phone':
+00044|       return ['phone_lookup', 'carrier'];
+00045|     case 'username':
+00046|     case 'person':
+00047|       return ['account_search'];
+00048|     case 'wallet':
+00049|       return ['balance', 'tx_history'];
+00050|     default:
+00051|       return ['basic'];
+00052|   }
+00053| }
+00054| 
+00055| /** map a pivot action like "flowsint_enrich:subdomain_discovery" to a task */
+00056| export function pivotToTask(
+00057|   action: string, entity: Entity,
+00058| ): { kind: string; params: Record<string, unknown> } {
+00059|   const i = action.indexOf(':');
+00060|   const head = i >= 0 ? action.slice(0, i) : action;
+00061|   const rest = i >= 0 ? action.slice(i + 1) : null;
+00062|   switch (head) {
+00063|     case 'hub_scan':
+00064|       return { kind: 'hub_scan', params: { scan: rest ?? 'username', value: entity.label } };
+00065|     case 'flowsint_enrich':
+00066|       return { kind: 'flowsint_enrich', params: { enrichers: rest ? [rest] : enrichersFor(String(entity.etype)) } };
+00067|     case 'openplanter_research':
+00068|       return { kind: 'openplanter_research', params: rest ? { question: rest } : {} };
+00069|     case 'archon_ground':
+00070|       return { kind: 'archon_ground', params: rest ? { question: rest } : {} };
+00071|     case 'web_pivots':
+00072|       return { kind: 'web_pivots', params: {} };
+00073|     default:
+00074|       return { kind: head, params: rest ? { scan: rest } : {} };
+00075|   }
+00076| }
+00077| 
+00078| export class Inspector {
+00079|   readonly el: HTMLElement;
+00080|   private entityId: string | null = null;
+00081|   private detail: EntityDetail | null = null;
+00082|   private subtab: 'inspect' | 'wiki' = 'inspect';
+00083| 
+00084|   private headEl: HTMLElement;
+00085|   private bodyEl: HTMLElement;
+00086|   private closeBtn: HTMLElement;
+00087| 
+00088|   constructor(private readonly cb: InspectorCallbacks) {
+00089|     this.headEl = h('div', { class: 'inspector-head' });
+00090|     this.bodyEl = h('div', { class: 'inspector-body' });
+00091|     this.closeBtn = h('button', {
+00092|       class: 'btn btn-ghost btn-sm', type: 'button', title: 'close',
+00093|       onclick: () => this.close(),
+00094|     }, '✕');
+00095|     this.el = h('aside', { class: 'rail rail-right', id: 'rail-right', hidden: true },
+00096|       h('div', { class: 'panel panel-rail panel-fill' },
+00097|         h('header', { class: 'panel-head' },
+00098|           h('span', { class: 'panel-label' }, 'inspector'),
+00099|           this.closeBtn,
+00100|         ),
+00101|         this.headEl,
+00102|         this.bodyEl,
+00103|       ),
+00104|     );
+00105|   }
+00106| 
+00107|   get isOpen(): boolean { return !this.el.hidden; }
+00108|   get currentId(): string | null { return this.entityId; }
+00109| 
+00110|   open(id: string): void {
+00111|     this.entityId = id;
+00112|     this.el.hidden = false;
+00113|     this.el.classList.add('open');
+00114|     void this.load();
+00115|   }
+00116| 
+00117|   close(): void {
+00118|     this.entityId = null;
+00119|     this.detail = null;
+00120|     this.el.hidden = true;
+00121|     this.el.classList.remove('open');
+00122|   }
+00123| 
+00124|   /** re-fetch if open; tolerate the entity having vanished; never clobber active typing */
+00125|   async refresh(): Promise<void> {
+00126|     if (!this.entityId) return;
+00127|     const ae = document.activeElement as HTMLElement | null;
+00128|     if (ae && this.el.contains(ae) && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT')) return;
+00129|     try {
+00130|       await api.getEntity(this.entityId);
+00131|     } catch {
+00132|       this.close();
+00133|       return;
+00134|     }
+00135|     await this.load();
+00136|   }
+00137| 
+00138|   private async load(): Promise<void> {
+00139|     if (!this.entityId) return;
+00140|     const id = this.entityId;
+00141|     let d: EntityDetail;
+00142|     try {
+00143|       d = await api.getEntity(id);
+00144|     } catch (e) {
+00145|       toast(e instanceof Error ? e.message : String(e), 'error');
+00146|       this.close();
+00147|       return;
+00148|     }
+00149|     if (this.entityId !== id) return; // switched away meanwhile
+00150|     this.detail = d;
+00151|     this.renderHead(d.entity);
+00152|     if (this.subtab === 'wiki') this.renderWiki(d);
+00153|     else this.renderInspect(d);
+00154|   }
+00155| 
+00156|   // ------------------------------------------------------------ header
+00157|   private renderHead(e: Entity): void {
+00158|     clear(this.headEl);
+00159|     const color = etypeColor(String(e.etype));
+00160|     this.headEl.append(
+00161|       h('div', { class: 'inspector-title' },
+00162|         h('span', { class: 'dot', style: `background:${color};box-shadow:0 0 6px ${color}66` }),
+00163|         h('span', { class: 'inspector-label', title: e.label }, e.label),
+00164|       ),
+00165|       h('div', { class: 'muted small mono' }, `${e.id} · ${e.etype}`),
+00166|     );
+00167|   }
+00168| 
+00169|   // ---------------------------------------------------------- inspect tab
+00170|   private renderInspect(d: EntityDetail): void {
+00171|     const e = d.entity;
+00172|     clear(this.bodyEl);
+00173|     this.bodyEl.append(this.subtabs());
+00174| 
+00175|     // fields
+00176|     const labelInput = h('input', { class: 'input input-sm', type: 'text', value: e.label, spellcheck: 'false' }) as HTMLInputElement;
+00177|     const commitLabel = (): void => {
+00178|       const v = labelInput.value.trim();
+00179|       if (!v || v === e.label) return;
+00180|       void guarded(api.patchEntity(e.id, { label: v }).then(() => { this.cb.graphChanged(); }), 'label updated');
+00181|     };
+00182|     labelInput.addEventListener('blur', commitLabel);
+00183|     labelInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') labelInput.blur(); });
+00184| 
+00185|     // etype is contract-fixed at creation (PATCH has no etype field) → read-only chip
+00186|     const etypeChip = h('span', {
+00187|       class: 'chip chip-etype mono',
+00188|       title: 'etype is fixed at creation (server dedup key)',
+00189|       style: `border-color:${etypeColor(String(e.etype))}55`,
+00190|     }, String(e.etype));
+00191| 
+00192|     const confRange = h('input', { class: 'range', type: 'range', min: '0', max: '1', step: '0.05', value: String(e.confidence) }) as HTMLInputElement;
+00193|     const confVal = h('span', { class: 'mono small' }, e.confidence.toFixed(2));
+00194|     confRange.addEventListener('input', () => { confVal.textContent = Number(confRange.value).toFixed(2); });
+00195|     confRange.addEventListener('change', () => {
+00196|       void guarded(api.patchEntity(e.id, { confidence: Number(confRange.value) }), 'confidence updated');
+00197|     });
+00198| 
+00199|     const pinnedBtn = h('button', {
+00200|       class: `btn btn-sm${e.pinned ? ' btn-primary' : ''}`, type: 'button',
+00201|       onclick: () => {
+00202|         void guarded(api.patchEntity(e.id, { pinned: !e.pinned }).then(() => {
+00203|           void this.load(); this.cb.graphChanged();
+00204|         }), e.pinned ? 'unpinned' : 'pinned');
+00205|       },
+00206|     }, e.pinned ? '★ pinned' : '☆ pinned');
+00207| 
+00208|     // data JSON
+00209|     const dataTa = h('textarea', {
+00210|       class: 'textarea textarea-sm mono', rows: '5', spellcheck: 'false',
+00211|     }) as HTMLTextAreaElement;
+00212|     dataTa.value = JSON.stringify(e.data ?? {}, null, 2);
+00213|     const applyData = h('button', {
+00214|       class: 'btn btn-sm', type: 'button',
+00215|       onclick: () => {
+00216|         try {
+00217|           const parsed: unknown = JSON.parse(dataTa.value);
+00218|           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+00219|             throw new Error('data must be a JSON object');
+00220|           }
+00221|           void guarded(api.patchEntity(e.id, { data: parsed as Record<string, unknown> }), 'data saved');
+00222|         } catch (err) {
+00223|           toast(err instanceof Error ? err.message : String(err), 'error');
+00224|         }
+00225|       },
+00226|     }, 'apply data');
+00227| 
+00228|     // relations
+00229|     const relList = h('div', { class: 'rel-list' });
+00230|     if (d.relations.length === 0) {
+00231|       relList.append(h('div', { class: 'muted small pad6' }, 'no relations'));
+00232|     }
+00233|     for (const r of d.relations) {
+00234|       relList.append(this.relRow(r, e.id));
+00235|     }
+00236| 
+00237|     // evidence
+00238|     const evList = h('div', { class: 'ev-list' });
+00239|     if (d.evidence.length === 0) {
+00240|       evList.append(h('div', { class: 'muted small pad6' }, 'no evidence attached'));
+00241|     }
+00242|     for (const v of d.evidence) {
+00243|       evList.append(
+00244|         h('div', { class: 'ev-item' },
+00245|           h('div', { class: 'row gap6' },
+00246|             h('span', { class: 'chip' }, v.kind),
+00247|             h('span', { class: 'muted small' }, fmtTs(v.ts)),
+00248|           ),
+00249|           v.url
+00250|             ? h('a', { class: 'ev-title', href: v.url, target: '_blank', rel: 'noopener noreferrer' },
+00251|               truncate(v.title ?? v.url, 80))
+00252|             : h('span', { class: 'ev-title' }, truncate(v.title ?? v.id, 80)),
+00253|           v.snippet ? h('div', { class: 'ev-snippet' }, truncate(v.snippet, 180)) : null,
+00254|         ),
+00255|       );
+00256|     }
+00257| 
+00258|     this.bodyEl.append(
+00259|       h('div', { class: 'grid2 gap6' }, labelInput, etypeChip),
+00260|       h('div', { class: 'row gap8 conf-row' },
+00261|         h('span', { class: 'field-label' }, 'conf'), confRange, confVal, pinnedBtn,
+00262|       ),
+00263|       h('div', { class: 'field' },
+00264|         h('span', { class: 'field-label' }, 'data (json)'),
+00265|         dataTa, applyData,
+00266|       ),
+00267|       h('div', { class: 'field' },
+00268|         h('span', { class: 'panel-label' }, `relations · ${d.relations.length}`),
+00269|         relList,
+00270|       ),
+00271|       h('div', { class: 'field' },
+00272|         h('span', { class: 'panel-label' }, `evidence · ${d.evidence.length}`),
+00273|         evList,
+00274|       ),
+00275|       this.actionsSection(e),
+00276|     );
+00277|   }
+00278| 
+00279|   private relRow(r: Relation, selfId: string): HTMLElement {
+00280|     const other = r.src === selfId ? r.dst : r.src;
+00281|     const dir = r.src === selfId ? '→' : '←';
+00282|     return h('div', {
+00283|       class: 'rel-item', tabindex: '0', title: `rel ${dir} ${this.cb.labelOf(other)}`,
+00284|       onclick: () => this.cb.navigate(other),
+00285|       onkeydown: (e: KeyboardEvent) => { if (e.key === 'Enter') this.cb.navigate(other); },
+00286|     },
+00287|       h('span', { class: 'rel-dir' }, dir),
+00288|       h('span', { class: 'chip chip-rel' }, r.rel),
+00289|       h('span', { class: 'rel-other' }, truncate(this.cb.labelOf(other), 34)),
+00290|     );
+00291|   }
+00292| 
+00293|   // ------------------------------------------------------------- actions
+00294|   private actionsSection(e: Entity): HTMLElement {
+00295|     const caseId = this.cb.caseId();
+00296|     const post = (kind: string, params: Record<string, unknown>, okMsg: string): void => {
+00297|       if (!caseId) { toast('no case selected', 'warn'); return; }
+00298|       void guarded(api.createTask(caseId, { kind, target: e.id, params }).then((t) => {
+00299|         this.cb.taskStarted(t);
+00300|         return t;
+00301|       }), okMsg);
+00302|     };
+00303| 
+00304|     const askQuestion = (title: string, kind: string): void => {
+00305|       void inputModal(title, 'question', 'what should the agent dig into?').then((q) => {
+00306|         if (q === null) return;
+00307|         if (!q) { toast('question required', 'warn'); return; }
+00308|         post(kind, { question: q }, `${kind} task queued`);
+00309|       });
+00310|     };
+00311| 
+00312|     const pivotsWrap = h('div', { class: 'pivots-wrap', hidden: true });
+00313|     const togglePivots = async (): Promise<void> => {
+00314|       if (!caseId) return;
+00315|       if (!pivotsWrap.hidden) { pivotsWrap.hidden = true; return; }
+00316|       pivotsWrap.hidden = false;
+00317|       clear(pivotsWrap);
+00318|       pivotsWrap.append(h('div', { class: 'muted small pad6' }, 'loading pivots…'));
+00319|       try {
+00320|         const { pivots } = await api.getPivots(caseId, e.id);
+00321|         clear(pivotsWrap);
+00322|         if (pivots.length === 0) {
+00323|           pivotsWrap.append(h('div', { class: 'muted small pad6' }, 'no pivot suggestions'));
+00324|         }
+00325|         for (const p of pivots) pivotsWrap.append(this.pivotCard(p, e));
+00326|       } catch (err) {
+00327|         clear(pivotsWrap);
+00328|         pivotsWrap.append(h('div', { class: 'small pad6 error-text' }, String(err instanceof Error ? err.message : err)));
+00329|       }
+00330|     };
+00331| 
+00332|     // merge modal
+00333|     const mergeInto = (): void => {
+00334|       const others = this.cb.entities().filter((x) => x.id !== e.id);
+00335|       if (others.length === 0) { toast('no other entities to merge with', 'warn'); return; }
+00336|       void inputModal('merge entity', `merge "${e.label}" into (type to search):`, 'search entities…').then((q) => {
+00337|         if (q === null || !q) return;
+00338|         const needle = q.toLowerCase();
+00339|         const hit = others.find((x) => x.label.toLowerCase().includes(needle))
+00340|           ?? others.find((x) => x.id.toLowerCase() === needle);
+00341|         if (!hit) { toast(`no entity matching "${q}"`, 'warn'); return; }
+00342|         if (!window.confirm(`Merge "${e.label}" into "${hit.label}"? Relations re-point; a same_as edge is kept.`)) return;
+00343|         void guarded(api.mergeEntity(hit.id, e.id).then((merged) => {
+00344|           this.cb.graphChanged();
+00345|           this.open(merged.id);
+00346|           return merged;
+00347|         }), `merged into ${hit.label}`);
+00348|       });
+00349|     };
+00350| 
+00351|     return h('div', { class: 'field actions-field' },
+00352|       h('span', { class: 'panel-label' }, 'actions'),
+00353|       h('div', { class: 'actions-grid' },
+00354|         h('button', {
+00355|           class: 'btn btn-sm', type: 'button',
+00356|           title: `hub multi-scan (${scanKindFor(String(e.etype))})`,
+00357|           onclick: () => post('hub_scan', { scan: scanKindFor(String(e.etype)), value: e.label }, 'hub_scan queued'),
+00358|         }, '▶ hub scan'),
+00359|         h('button', {
+00360|           class: 'btn btn-sm', type: 'button',
+00361|           title: `flowsint enrichers: ${enrichersFor(String(e.etype)).join(', ')}`,
+00362|           onclick: () => post('flowsint_enrich', { enrichers: enrichersFor(String(e.etype)) }, 'flowsint_enrich queued'),
+00363|         }, '▶ flowsint enrich'),
+00364|         h('button', { class: 'btn btn-sm', type: 'button', onclick: () => askQuestion('openplanter research', 'openplanter_research') }, '▶ openplanter research'),
+00365|         h('button', { class: 'btn btn-sm', type: 'button', onclick: () => askQuestion('archon ground', 'archon_ground') }, '▶ archon ground'),
+00366|         h('button', {
+00367|           class: 'btn btn-sm', type: 'button', onclick: () => void togglePivots(),
+00368|         }, '◇ pivots'),
+00369|         h('button', { class: 'btn btn-sm', type: 'button', onclick: () => post('web_pivots', {}, 'web_pivots queued') }, '▶ web pivots'),
+00370|         h('button', { class: 'btn btn-sm', type: 'button', onclick: () => mergeInto() }, '⇉ merge…'),
+00371|         h('button', {
+00372|           class: 'btn btn-sm btn-danger', type: 'button',
+00373|           onclick: () => {
+00374|             if (!window.confirm(`Delete entity "${e.label}"? Its relations detach; evidence stays on the case.`)) return;
+00375|             void guarded(api.deleteEntity(e.id), () => {
+00376|               this.close();
+00377|               this.cb.graphChanged();
+00378|               return 'entity deleted';
+00379|             });
+00380|           },
+00381|         }, '✕ delete'),
+00382|       ),
+00383|       pivotsWrap,
+00384|     );
+00385|   }
+00386| 
+00387|   private pivotCard(p: PivotSuggestion, e: Entity): HTMLElement {
+00388|     const caseId = this.cb.caseId();
+00389|     return h('div', { class: 'pivot-card' },
+00390|       h('div', { class: 'row gap6' },
+00391|         h('span', { class: 'chip chip-action mono' }, p.action),
+00392|         h('span', {
+00393|           class: 'pivot-priority mono', title: `priority ${p.priority.toFixed(2)}`,
+00394|         }, p.priority.toFixed(2)),
+00395|       ),
+00396|       h('div', { class: 'pivot-reason muted small' }, p.reason),
+00397|       h('button', {
+00398|         class: 'btn btn-sm btn-primary', type: 'button',
+00399|         onclick: () => {
+00400|           if (!caseId) return;
+00401|           const { kind, params } = pivotToTask(p.action, e);
+00402|           void guarded(api.createTask(caseId, { kind, target: e.id, params }).then((t) => {
+00403|             this.cb.taskStarted(t);
+00404|             return t;
+00405|           }), `${kind} queued from pivot`);
+00406|         },
+00407|       }, 'run'),
+00408|     );
+00409|   }
+00410| 
+00411|   // -------------------------------------------------------------- wiki tab
+00412|   private renderWiki(d: EntityDetail): void {
+00413|     const e = d.entity;
+00414|     clear(this.bodyEl);
+00415|     this.bodyEl.append(this.subtabs());
+00416| 
+00417|     const ta = h('textarea', {
+00418|       class: 'textarea wiki-ta mono', spellcheck: 'false',
+00419|       placeholder: '# wiki doc\n\nrender generates the skeleton; prose under Summary / Open questions is preserved.',
+00420|     }) as HTMLTextAreaElement;
+00421|     ta.value = d.doc ?? '';
+00422| 
+00423|     const meta = h('div', { class: 'muted small' }, d.doc ? 'doc loaded' : 'no doc yet — hit render');
+00424| 
+00425|     this.bodyEl.append(
+00426|       h('div', { class: 'row gap6' },
+00427|         h('button', {
+00428|           class: 'btn btn-sm', type: 'button',
+00429|           onclick: () => {
+00430|             void guarded(api.renderDoc(e.id).then((doc) => {
+00431|               ta.value = doc;
+00432|               meta.textContent = 'rendered from graph facts';
+00433|               return doc;
+00434|             }), 'doc rendered');
+00435|           },
+00436|         }, '⟐ render'),
+00437|         h('button', {
+00438|           class: 'btn btn-sm btn-primary', type: 'button',
+00439|           onclick: () => {
+00440|             void guarded(api.patchDoc(e.id, ta.value).then((doc) => {
+00441|               meta.textContent = `saved ${fmtTs(new Date().toISOString())}`;
+00442|               return doc;
+00443|             }), 'doc saved');
+00444|           },
+00445|         }, '⌸ save'),
+00446|       ),
+00447|       meta,
+00448|       ta,
+00449|     );
+00450|   }
+00451| 
+00452|   private subtabs(): HTMLElement {
+00453|     const mk = (key: 'inspect' | 'wiki', label: string): HTMLElement =>
+00454|       h('button', {
+00455|         class: `subtab${this.subtab === key ? ' active' : ''}`, type: 'button',
+00456|         onclick: () => {
+00457|           if (this.subtab === key || !this.detail) return;
+00458|           this.subtab = key;
+00459|           if (key === 'wiki') this.renderWiki(this.detail);
+00460|           else this.renderInspect(this.detail);
+00461|         },
+00462|       }, label);
+00463|     return h('div', { class: 'subtabs' }, mk('inspect', 'INSPECT'), mk('wiki', 'WIKI DOC'));
+00464|   }
+00465| }
+00466| 
+00467| export function inspectorEmptyState(): HTMLElement {
+00468|   return emptyState('no selection', 'click a node to inspect · shift-click two nodes for path mode');
+00469| }
+00470| 
+
+(End of file - total 470 lines)
+</file>

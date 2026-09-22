@@ -1,0 +1,234 @@
+<file>
+00001| /**
+00002|  * Minimal in-house markdown renderer (no deps).
+00003|  * Supports: h1–h6, bold/italic/strike, inline + fenced code, links,
+00004|  * pipe tables, hr, ordered/unordered lists (with nesting), paragraphs.
+00005|  * Everything is HTML-escaped before inline transforms; link schemes are
+00006|  * whitelisted (http/https/mailto/relative). Returns an HTML string.
+00007|  */
+00008| 
+00009| const ESC_MAP: Record<string, string> = {
+00010|   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+00011| };
+00012| 
+00013| function esc(s: string): string {
+00014|   return s.replace(/[&<>"']/g, (c) => ESC_MAP[c] ?? c);
+00015| }
+00016| 
+00017| function safeUrl(href: string): string | null {
+00018|   const t = href.trim();
+00019|   if (/^https?:\/\//i.test(t)) return t;
+00020|   if (/^mailto:[^\s@]+@[^\s@]+$/i.test(t)) return t;
+00021|   if (/^\/(?!\/)/.test(t)) return t; // same-origin relative, not protocol-relative
+00022|   if (/^#[\w-]*$/.test(t)) return t;
+00023|   return null;
+00024| }
+00025| 
+00026| interface CodeSpan { placeholder: string; html: string }
+00027| 
+00028| function inline(raw: string): string {
+00029|   let s = esc(raw);
+00030|   const codes: CodeSpan[] = [];
+00031|   s = s.replace(/`([^`\n]+)`/g, (_m, c: string) => {
+00032|     const ph = `\u0000${codes.length}\u0000`;
+00033|     codes.push({ placeholder: ph, html: `<code>${c}</code>` });
+00034|     return ph;
+00035|   });
+00036|   // links: [text](url)
+00037|   s = s.replace(/\[([^\]\n]*)\]\(([^)\s]+)\)/g, (_m, text: string, href: string) => {
+00038|     const url = safeUrl(href);
+00039|     if (!url) return text;
+00040|     return `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+00041|   });
+00042|   // auto-link bare urls — intentional: only http(s), keeps dossiers clickable
+00043|   s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (_m, pre: string, url: string) =>
+00044|     `${pre}<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
+00045|   s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+00046|   s = s.replace(/(^|[^\w*])\*([^*\n]+)\*(?=[^\w*]|$)/g, '$1<em>$2</em>');
+00047|   s = s.replace(/(^|\s)_([^_\n]+)_(?=\s|[.,;:!?)]|$)/g, '$1<em>$2</em>');
+00048|   s = s.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
+00049|   for (const c of codes) s = s.split(c.placeholder).join(c.html);
+00050|   return s;
+00051| }
+00052| 
+00053| const HR_RE = /^\s{0,3}(?:-[^\S\n]*-[^\S\n]*-|_[^\S\n]*_[^\S\n]*_|\*[^\S\n]*\*[^\S\n]*\*)[\s*_-]*$/;
+00054| const LIST_ITEM_RE = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
+00055| const TABLE_SEP_RE = /^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
+00056| 
+00057| /**
+00058|  * Anchor slug for h2/h3 (github-ish): lowercase, markdown tokens stripped,
+00059|  * non-alphanumerics collapsed to '-', deduped per render. Returns an id that
+00060|  * is safe for both the id attribute and querySelector('#…').
+00061|  */
+00062| function slugifyHeading(raw: string, used: Set<string>): string {
+00063|   let s = raw
+00064|     .toLowerCase()
+00065|     .replace(/[`*_~[\]()!#]/g, '')
+00066|     .replace(/[^a-z0-9]+/g, '-')
+00067|     .replace(/^-+|-+$/g, '');
+00068|   if (!s) s = 'section';
+00069|   if (/^[0-9]/.test(s)) s = `s-${s}`;
+00070|   let id = s;
+00071|   for (let n = 2; used.has(id); n++) id = `${s}-${n}`;
+00072|   used.add(id);
+00073|   return id;
+00074| }
+00075| 
+00076| function splitRow(line: string): string[] {
+00077|   let t = line.trim();
+00078|   if (t.startsWith('|')) t = t.slice(1);
+00079|   if (t.endsWith('|')) t = t.slice(0, -1);
+00080|   return t.split('|').map((c) => c.trim());
+00081| }
+00082| 
+00083| function parseList(lines: string[], start: number): { html: string; next: number } {
+00084|   const out: string[] = [];
+00085|   const stack: Array<{ indent: number; ordered: boolean }> = [];
+00086|   const closeTop = (): void => {
+00087|     const top = stack.pop();
+00088|     if (top) out.push(top.ordered ? '</ol>' : '</ul>');
+00089|   };
+00090|   let i = start;
+00091|   for (; i < lines.length; i++) {
+00092|     const m = LIST_ITEM_RE.exec(lines[i]);
+00093|     if (!m) break;
+00094|     const indent = m[1].replace(/\t/g, '  ').length;
+00095|     const ordered = /\d/.test(m[2][0]);
+00096|     const content = inline(m[3]);
+00097|     for (;;) {
+00098|       if (stack.length === 0) {
+00099|         stack.push({ indent, ordered });
+00100|         out.push(ordered ? '<ol>' : '<ul>');
+00101|         break;
+00102|       }
+00103|       const top = stack[stack.length - 1];
+00104|       if (indent > top.indent + 1) {
+00105|         stack.push({ indent, ordered });
+00106|         out.push(ordered ? '<ol>' : '<ul>');
+00107|         continue;
+00108|       }
+00109|       if (indent < top.indent - 1 || (indent <= top.indent - 1)) { closeTop(); continue; }
+00110|       break;
+00111|     }
+00112|     out.push(`<li>${content}</li>`);
+00113|   }
+00114|   while (stack.length > 0) closeTop();
+00115|   return { html: out.join(''), next: i };
+00116| }
+00117| 
+00118| export function renderMarkdown(src: string): string {
+00119|   const lines = src.replace(/\r\n?/g, '\n').split('\n');
+00120|   const out: string[] = [];
+00121|   let i = 0;
+00122|   let para: string[] = [];
+00123|   const headingIds = new Set<string>();
+00124| 
+00125|   const flushPara = (): void => {
+00126|     if (para.length > 0) {
+00127|       out.push(`<p>${inline(para.join(' '))}</p>`);
+00128|       para = [];
+00129|     }
+00130|   };
+00131| 
+00132|   while (i < lines.length) {
+00133|     const line = lines[i];
+00134| 
+00135|     if (!line.trim()) { flushPara(); i++; continue; }
+00136| 
+00137|     // fenced code
+00138|     const fence = /^\s*```(.*)$/.exec(line);
+00139|     if (fence) {
+00140|       flushPara();
+00141|       const lang = fence[1].trim();
+00142|       const body: string[] = [];
+00143|       i++;
+00144|       while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) {
+00145|         body.push(lines[i]);
+00146|         i++;
+00147|       }
+00148|       i++; // closing fence (or EOF)
+00149|       const cls = lang ? ` class="lang-${esc(lang)}"` : '';
+00150|       out.push(`<pre><code${cls}>${esc(body.join('\n'))}</code></pre>`);
+00151|       continue;
+00152|     }
+00153| 
+00154|     // heading (h2/h3 get a slug id for in-page anchors, e.g. the guide TOC)
+00155|     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+00156|     if (heading) {
+00157|       flushPara();
+00158|       const lvl = heading[1].length;
+00159|       const inner = inline(heading[2]);
+00160|       if (lvl === 2 || lvl === 3) {
+00161|         const id = slugifyHeading(heading[2], headingIds);
+00162|         out.push(`<h${lvl} id="${esc(id)}">${inner}</h${lvl}>`);
+00163|       } else {
+00164|         out.push(`<h${lvl}>${inner}</h${lvl}>`);
+00165|       }
+00166|       i++;
+00167|       continue;
+00168|     }
+00169| 
+00170|     // hr
+00171|     if (HR_RE.test(line)) {
+00172|       flushPara();
+00173|       out.push('<hr>');
+00174|       i++;
+00175|       continue;
+00176|     }
+00177| 
+00178|     // table (header row + separator row)
+00179|     if (line.includes('|') && i + 1 < lines.length && TABLE_SEP_RE.test(lines[i + 1])) {
+00180|       flushPara();
+00181|       const header = splitRow(line);
+00182|       i += 2;
+00183|       const rows: string[][] = [];
+00184|       while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+00185|         rows.push(splitRow(lines[i]));
+00186|         i++;
+00187|       }
+00188|       const th = header.map((c) => `<th>${inline(c)}</th>`).join('');
+00189|       const trs = rows.map((r) => {
+00190|         const tds = header.map((_, ci) => `<td>${inline(r[ci] ?? '')}</td>`).join('');
+00191|         return `<tr>${tds}</tr>`;
+00192|       }).join('');
+00193|       out.push(`<div class="md-table-wrap"><table><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table></div>`);
+00194|       continue;
+00195|     }
+00196| 
+00197|     // lists
+00198|     if (LIST_ITEM_RE.test(line)) {
+00199|       flushPara();
+00200|       const res = parseList(lines, i);
+00201|       out.push(res.html);
+00202|       i = res.next;
+00203|       continue;
+00204|     }
+00205| 
+00206|     // blockquote (simple: consecutive > lines)
+00207|     if (/^\s{0,3}>\s?/.test(line)) {
+00208|       flushPara();
+00209|       const body: string[] = [];
+00210|       while (i < lines.length && /^\s{0,3}>\s?/.test(lines[i])) {
+00211|         body.push(lines[i].replace(/^\s{0,3}>\s?/, ''));
+00212|         i++;
+00213|       }
+00214|       out.push(`<blockquote><p>${inline(body.join(' '))}</p></blockquote>`);
+00215|       continue;
+00216|     }
+00217| 
+00218|     // paragraph line
+00219|     para.push(line.trim());
+00220|     i++;
+00221|   }
+00222|   flushPara();
+00223|   return out.join('\n');
+00224| }
+00225| 
+00226| /** Render markdown into an element (safe: escaped + scheme-whitelisted). */
+00227| export function renderMarkdownInto(el: HTMLElement, src: string): void {
+00228|   el.innerHTML = renderMarkdown(src);
+00229| }
+00230| 
+
+(End of file - total 230 lines)
+</file>

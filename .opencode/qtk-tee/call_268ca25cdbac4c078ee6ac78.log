@@ -1,0 +1,104 @@
+Found 100 matches
+/home/fivelidz/projects/GLM_projects/investigation/qalarc_osint/frontend/index.html:
+  Line 23: <style>
+  Line 724: <header class="cia">
+  Line 768: <main id="main">
+  Line 772:     <section class="hero" aria-labelledby="heroTitle">
+  Line 786:     <div id="scannerArea">
+  Line 788:       <nav id="tabsNav" class="tabs" role="tablist" aria-label="Dossier sheets">
+  Line 797:       <section class="panel" id="panel-case" role="tabpanel" aria-labelledby="tab-case" tabindex="0">
+  Line 856:       <section class="panel" id="panel-dating" role="tabpanel" aria-labelledby="tab-dating" tabindex="0" hidden>
+  Line 899:       <section class="panel" id="panel-tools" role="tabpanel" aria-labelledby="tab-tools" tabindex="0" hidden>
+  Line 908:       <section class="panel spec" id="panel-stack" role="tabpanel" aria-labelledby="tab-stack" tabindex="0" hidden>
+  Line 919:             <li><span class="term">Auth</span>Optional bearer token (<span class="mono">Authorization: Bearer <redacted> when enabled, clients poll instead of streaming since EventSource cannot send headers.</li>
+  Line 955:       <section class="panel" id="panel-recent" role="tabpanel" aria-labelledby="tab-recent" tabindex="0" hidden>
+  Line 971:     <section id="jobView" aria-label="Case job" hidden>
+  Line 992:       <div id="jobTools"></div>
+  Line 1000:         <div id="console" class="console" role="log" aria-live="off" aria-label="Live scan log" tabindex="0" title="Live log — newest at the bottom (max 2000 lines kept)"></div>
+  Line 1027:     <p class="micro">Sent as <code class="mono">Authorization: Bearer <redacted> on every request. When set, live event streaming is unavailable (EventSource cannot send headers) and the log falls back to 1.5 s polling.</p>
+  Line 1051: <div id="toasts"></div>
+  Line 1053: <script>
+  Line 1087: function el(tag, cls, text) {
+  Line 1094: function chevronEl() {
+  Line 1113: function lsGet(k) { try { return localStorage.getItem(k); } catch (_) { return null; } }
+  Line 1114: function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (_) {} }
+  Line 1115: function lsDel(k) { try { localStorage.removeItem(k); } catch (_) {} }
+  Line 1116: function ssGet(k) { try { return sessionStorage.getItem(k); } catch (_) { return null; } }
+  Line 1117: function ssSet(k, v) { try { sessionStorage.setItem(k, v); } catch (_) {} }
+  Line 1119: function getBase() {
+  Line 1127: function getToken() { return (lsGet(LS_TOKEN) || '').trim(); }
+  Line 1130: function caseNo() {
+  Line 1170: function safeParse(s) { try { return JSON.parse(s); } catch (_) { return null; } }
+  Line 1171: function isTerminal(s) { return s === 'done' || s === 'error'; }
+  Line 1174: function toMs(v) {
+  Line 1186: function fmtDur(totalSec) {
+  Line 1194: function download(filename, text, mime) {
+  Line 1206: function isDatingUrl(u) {
+  Line 1215: function fallbackQtype(job) {
+  Line 1221: function jobColumns(job) {
+  Line 1234: function fallbackForSingle(job) {
+  Line 1238: function subjectLine(job) {
+  Line 1245: async function api(path, opts) {
+  Line 1256:     const res = await fetch(base + path, Object.assign({}, opts, { headers: headers, signal: ctrl.signal }));
+  Line 1265: function errText(data, fallback) {
+  Line 1274: function toast(msg, kind, ms) {
+  Line 1292:   x.addEventListener('click', kill);
+  Line 1299: async function checkHealth() {
+  Line 1326: function renderHealth() {
+  Line 1355: async function fetchTools() {
+  Line 1367: function setScanning(on) {
+  Line 1381: function renderToolsGrid() {
+  Line 1412: function toolsForKind(kind) { return state.tools.filter(t => t.kind === kind); }
+  Line 1414: function renderChips() {
+  Line 1433: function renderChipGroup(container, tools, group) {
+  Line 1472:       b.addEventListener('click', e => {
+  Line 1480:       b.addEventListener('click', () => {
+  Line 1489: function getSelectedTools(group) {
+  Line 1503: function selectTab(name) {
+  Line 1516: function onTabsKeydown(e) {
+  Line 1535: async function refreshRecent() {
+  Line 1559: function recentRow(j) {
+  Line 1573:   b.addEventListener('click', () => {
+  Line 1585: async function postScan(body, origin, wanted) {
+  Line 1620: function startCase() {
+  Line 1652: function startDating() {
+  Line 1676: async function liteCase() {
+  Line 1786: function openLiteJob(job, wanted, logs) {
+  Line 1817: function showJobView(show) {
+  Line 1823: async function openJob(id, origin, wanted) {
+  Line 1877: function applyJobData(data, opts) {
+  Line 1902: function mergeTail(prev, tail) {
+  Line 1918: function appendLog(tool, qtype, text) {
+  Line 1932: function rebuildLogLinesFromDom() {
+  Line 1941: function startLive(id) {
+  Line 1942:   if (getToken() || typeof EventSource === 'undefined') startPolling(id);
+  Line 1946: function stopLive() {
+  Line 1951: function startPolling(id) {
+  Line 1966: function startStream(id) {
+  Line 1970:   try { es = new EventSource(url); }
+  Line 1973:   es.addEventListener('snapshot', ev => {
+  Line 1977:   es.addEventListener('log', ev => {
+  Line 1981:   es.addEventListener('found', ev => {
+  Line 1985:   es.addEventListener('info', ev => {
+  Line 1989:   es.addEventListener('tool_done', ev => {
+  Line 1993:   es.addEventListener('job_done', ev => {
+  Line 2007: async function finishStream(fallbackStatus) {
+  Line 2021: function ensureResult(tool, qtype) {
+  Line 2033: function addFound(tool, qtype, item) {
+  Line 2046: function addInfo(tool, qtype, item) {
+  Line 2060: function toolDone(tool, qtype, d) {
+  Line 2070: function concludeJob(silent) {
+  Line 2095: function statusBadge(status) {
+  Line 2104: function renderJobHeader() {
+  Line 2120: function renderJobTools() {
+  Line 2136: function buildExhibitColumn(c, idx, job, results) {
+  Line 2168: function applyDatingFilter(list) {
+  Line 2173: function datingFilterNote(total, visible) {
+  Line 2179: function foundSummary(r) {
+  Line 2190: function infoFacts(r) { return (Array.isArray(r.info) ? r.info : []).filter(i => i && i.url == null); }
+  Line 2191: function infoPivots(r) { return (Array.isArray(r.info) ? r.info : []).filter(i => i && i.url != null); }
+  Line 2193: function buildToolCard(r) {
+  Line 2216:   head.addEventListener('click', () => {
+  Line 2279: function evidenceRow(f) {
+
+(Results are truncated. Consider using a more specific path or pattern.)

@@ -1,8 +1,28 @@
-# Qalarc OSINT Hub
+# Qalarc OSINT Hub + NEXUS
+
+Two layers, one investigation stack:
+
+- **OSINT Hub** (this root) — web app wrapping local scanner CLIs behind a
+  clean UI. Built 2026-09-06 on the repo catalog at `../public_repos/`.
+- **NEXUS investigation workbench** (`nexus/`) — graph-first case management
+  that consumes the hub (and flowsint, OpenPlanter, archon, laya, jev) to
+  link entities, find connections, and produce evidence-backed dossiers and
+  article briefs. See `nexus/docs/ARCHITECTURE.md`.
+
+```
+NEXUS quickstart:
+  cd nexus/webui && npm install && npm run build   # once
+  scripts/run_nexus.sh                             # serves workbench on :8801
+  # desktop (Tauri 2): cargo run -p nexus-tauri --features desktop
+  # archon/agents:   add nexus/mcp/nexus_mcp.py as an MCP server (NEXUS_URL)
+```
+
+---
+
+## OSINT Hub (root)
 
 Web app that wraps local OSINT scanner tools behind a clean UI — to be hosted as a
-qalarc.com project. Built 2026-09-06 on top of the repo catalog at
-`../public_repos/` (see `CATALOG.md` there for the tool research).
+qalarc.com project.
 
 ```
 ┌────────────────────┐        ┌─────────────────────────────────┐

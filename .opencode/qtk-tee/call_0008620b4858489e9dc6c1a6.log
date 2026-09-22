@@ -1,0 +1,254 @@
+<file>
+00001| //! Data model — CONTRACT §2.
+00002| //!
+00003| //! All types are `serde` snake_case, `Clone` + `Debug`. Timestamps are
+00004| //! RFC3339 UTC strings; ids are `<prefix>_<16 hex>`.
+00005| 
+00006| use serde::{Deserialize, Serialize};
+00007| 
+00008| /// The 22 fixed entity types (CONTRACT §2).
+00009| #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+00010| #[serde(rename_all = "snake_case")]
+00011| pub enum EType {
+00012|     Person,
+00013|     Org,
+00014|     Username,
+00015|     Alias,
+00016|     Email,
+00017|     Phone,
+00018|     Domain,
+00019|     Subdomain,
+00020|     Ip,
+00021|     Asn,
+00022|     Cidr,
+00023|     Website,
+00024|     SocialProfile,
+00025|     Wallet,
+00026|     Transaction,
+00027|     Image,
+00028|     Document,
+00029|     Article,
+00030|     Event,
+00031|     Location,
+00032|     Topic,
+00033|     Note,
+00034| }
+00035| 
+00036| /// Canonical relation types (CONTRACT §2). `rel` stays a free-form string;
+00037| /// these are the well-known ones (used for sentence templates in reports).
+00038| pub const CANONICAL_RELS: &[&str] = &[
+00039|     "uses",
+00040|     "owns",
+00041|     "resolves_to",
+00042|     "subdomain_of",
+00043|     "registered_to",
+00044|     "mentions",
+00045|     "contacted",
+00046|     "same_as",
+00047|     "paid_to",
+00048|     "located_in",
+00049|     "member_of",
+00050|     "works_at",
+00051|     "sourced_from",
+00052|     "derived_from",
+00053|     "related_to",
+00054|     "posted_on",
+00055| ];
+00056| 
+00057| impl EType {
+00058|     /// All 22 variants, fixed order.
+00059|     pub const ALL: [EType; 22] = [
+00060|         Self::Person,
+00061|         Self::Org,
+00062|         Self::Username,
+00063|         Self::Alias,
+00064|         Self::Email,
+00065|         Self::Phone,
+00066|         Self::Domain,
+00067|         Self::Subdomain,
+00068|         Self::Ip,
+00069|         Self::Asn,
+00070|         Self::Cidr,
+00071|         Self::Website,
+00072|         Self::SocialProfile,
+00073|         Self::Wallet,
+00074|         Self::Transaction,
+00075|         Self::Image,
+00076|         Self::Document,
+00077|         Self::Article,
+00078|         Self::Event,
+00079|         Self::Location,
+00080|         Self::Topic,
+00081|         Self::Note,
+00082|     ];
+00083| 
+00084|     pub fn as_str(self) -> &'static str {
+00085|         match self {
+00086|             Self::Person => "person",
+00087|             Self::Org => "org",
+00088|             Self::Username => "username",
+00089|             Self::Alias => "alias",
+00090|             Self::Email => "email",
+00091|             Self::Phone => "phone",
+00092|             Self::Domain => "domain",
+00093|             Self::Subdomain => "subdomain",
+00094|             Self::Ip => "ip",
+00095|             Self::Asn => "asn",
+00096|             Self::Cidr => "cidr",
+00097|             Self::Website => "website",
+00098|             Self::SocialProfile => "social_profile",
+00099|             Self::Wallet => "wallet",
+00100|             Self::Transaction => "transaction",
+00101|             Self::Image => "image",
+00102|             Self::Document => "document",
+00103|             Self::Article => "article",
+00104|             Self::Event => "event",
+00105|             Self::Location => "location",
+00106|             Self::Topic => "topic",
+00107|             Self::Note => "note",
+00108|         }
+00109|     }
+00110| 
+00111|     /// Parses an etype string; see also the [`std::str::FromStr`] impl
+00112|     /// (which maps failures to [`crate::NexusError::Invalid`]).
+00113|     #[allow(clippy::should_implement_trait)] // inherent Option-returning form per CONTRACT §3
+00114|     pub fn from_str(s: &str) -> Option<Self> {
+00115|         Some(match s {
+00116|             "person" => Self::Person,
+00117|             "org" => Self::Org,
+00118|             "username" => Self::Username,
+00119|             "alias" => Self::Alias,
+00120|             "email" => Self::Email,
+00121|             "phone" => Self::Phone,
+00122|             "domain" => Self::Domain,
+00123|             "subdomain" => Self::Subdomain,
+00124|             "ip" => Self::Ip,
+00125|             "asn" => Self::Asn,
+00126|             "cidr" => Self::Cidr,
+00127|             "website" => Self::Website,
+00128|             "social_profile" => Self::SocialProfile,
+00129|             "wallet" => Self::Wallet,
+00130|             "transaction" => Self::Transaction,
+00131|             "image" => Self::Image,
+00132|             "document" => Self::Document,
+00133|             "article" => Self::Article,
+00134|             "event" => Self::Event,
+00135|             "location" => Self::Location,
+00136|             "topic" => Self::Topic,
+00137|             "note" => Self::Note,
+00138|             _ => return None,
+00139|         })
+00140|     }
+00141| }
+00142| 
+00143| impl std::fmt::Display for EType {
+00144|     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+00145|         f.write_str(self.as_str())
+00146|     }
+00147| }
+00148| 
+00149| impl std::str::FromStr for EType {
+00150|     type Err = crate::NexusError;
+00151|     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+00152|         Self::from_str(s).ok_or_else(|| crate::NexusError::Invalid(format!("unknown etype: {s}")))
+00153|     }
+00154| }
+00155| 
+00156| /// Investigation case.
+00157| #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+00158| pub struct Case {
+00159|     pub id: String,
+00160|     pub name: String,
+00161|     pub slug: String,
+00162|     pub status: String,
+00163|     pub notes: String,
+00164|     pub tags: Vec<String>,
+00165|     pub created_at: String,
+00166|     pub updated_at: String,
+00167| }
+00168| 
+00169| /// A node in the case graph.
+00170| #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+00171| pub struct Entity {
+00172|     pub id: String,
+00173|     pub case_id: String,
+00174|     pub etype: EType,
+00175|     pub label: String,
+00176|     /// Free JSON (e.g. `{"platform":"github","url":"..."}`).
+00177|     pub data: serde_json::Value,
+00178|     pub confidence: f64,
+00179|     pub pinned: bool,
+00180|     pub first_seen: String,
+00181|     pub last_seen: String,
+00182| }
+00183| 
+00184| /// A typed edge in the case graph.
+00185| #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+00186| pub struct Relation {
+00187|     pub id: String,
+00188|     pub case_id: String,
+00189|     pub src: String,
+00190|     pub dst: String,
+00191|     pub rel: String,
+00192|     pub weight: f64,
+00193|     pub confidence: f64,
+00194|     pub source: Option<String>,
+00195|     /// Optional inline evidence blob `{title,url,...}` (CONTRACT §2).
+00196|     pub evidence: Option<serde_json::Value>,
+00197|     pub created_at: String,
+00198| }
+00199| 
+00200| /// Provenance record attached to an entity or relation id (`subject`).
+00201| #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+00202| pub struct Evidence {
+00203|     pub id: String,
+00204|     pub case_id: String,
+00205|     pub subject: String,
+00206|     pub kind: String,
+00207|     pub title: Option<String>,
+00208|     pub url: Option<String>,
+00209|     pub snippet: Option<String>,
+00210|     pub raw: serde_json::Value,
+00211|     pub confidence: f64,
+00212|     pub ts: String,
+00213| }
+00214| 
+00215| /// Case timeline event.
+00216| #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+00217| pub struct TimelineEvent {
+00218|     pub id: String,
+00219|     pub case_id: String,
+00220|     pub ts: String,
+00221|     pub entity_id: Option<String>,
+00222|     pub kind: String,
+00223|     pub title: String,
+00224|     pub detail: serde_json::Value,
+00225|     pub source: Option<String>,
+00226| }
+00227| 
+00228| fn d_one() -> f64 {
+00229|     1.0
+00230| }
+00231| 
+00232| fn d_obj() -> serde_json::Value {
+00233|     serde_json::json!({})
+00234| }
+00235| 
+00236| /// Input for [`crate::Store::add_entity`].
+00237| #[derive(Debug, Clone, Serialize, Deserialize)]
+00238| pub struct NewEntity {
+00239|     pub etype: EType,
+00240|     pub label: String,
+00241|     #[serde(default = "d_obj")]
+00242|     pub data: serde_json::Value,
+00243|     #[serde(default = "d_one")]
+00244|     pub confidence: f64,
+00245|     #[serde(default)]
+00246|     pub pinned: bool,
+00247| }
+00248| 
+00249| impl NewEntity {
+00250|     pub fn new(etype: EType, label: impl Into<String>) -> Self {
+
+(File has more lines. Use 'offset' parameter to read beyond line 250)
+</file>

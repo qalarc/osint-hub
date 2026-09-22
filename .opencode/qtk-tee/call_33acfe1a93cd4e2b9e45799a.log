@@ -1,0 +1,228 @@
+<file>
+00161|     quality: 'default',
+00162|     randomize: true,
+00163|     animate: true,
+00164|     animationDuration: 450,
+00165|     padding: 48,
+00166|     nodeRepulsion: 7000,
+00167|     idealEdgeLength: () => 90,
+00168|   } as unknown as cytoscape.LayoutOptions;
+00169| }
+00170| 
+00171| export class GraphView {
+00172|   readonly cy: cytoscape.Core;
+00173|   private layoutName: LayoutName = 'fcose';
+00174|   private filters: GraphFilterState = { search: '', hiddenEtypes: new Set() };
+00175|   private entityById = new Map<string, Entity>();
+00176|   private ro: ResizeObserver | null = null;
+00177| 
+00178|   constructor(container: HTMLElement) {
+00179|     this.cy = cytoscape({
+00180|       container,
+00181|       elements: [],
+00182|       style: STYLES,
+00183|       wheelSensitivity: 0.22,
+00184|       maxZoom: 3,
+00185|       minZoom: 0.08,
+00186|       boxSelectionEnabled: true,
+00187|     });
+00188|     // keep canvas sized with its flex container
+00189|     if (typeof ResizeObserver !== 'undefined') {
+00190|       this.ro = new ResizeObserver(() => this.cy.resize());
+00191|       this.ro.observe(container);
+00192|     }
+00193|     // edge labels on hover
+00194|     this.cy.on('mouseover', 'edge', (e) => e.target.addClass('hover-label'));
+00195|     this.cy.on('mouseout', 'edge', (e) => e.target.removeClass('hover-label'));
+00196|   }
+00197| 
+00198|   destroy(): void {
+00199|     this.ro?.disconnect();
+00200|     this.cy.destroy();
+00201|   }
+00202| 
+00203|   get currentLayout(): LayoutName {
+00204|     return this.layoutName;
+00205|   }
+00206| 
+00207|   entities(): Entity[] {
+00208|     return [...this.entityById.values()];
+00209|   }
+00210| 
+00211|   entity(id: string): Entity | undefined {
+00212|     return this.entityById.get(id);
+00213|   }
+00214| 
+00215|   label(id: string): string {
+00216|     return this.entityById.get(id)?.label ?? id;
+00217|   }
+00218| 
+00219|   etypes(): string[] {
+00220|     const present = new Set<string>();
+00221|     this.entityById.forEach((e) => { present.add(String(e.etype)); });
+00222|     const known = (ETYPES as readonly string[]).filter((t) => present.has(t));
+00223|     const extra = [...present].filter((t) => !known.includes(t)).sort();
+00224|     return [...known, ...extra];
+00225|   }
+00226| 
+00227|   /**
+00228|    * Replace graph data. Preserves positions of surviving nodes (fresh SSE
+00229|    * data doesn't nuke the analyst's arrangement) unless `relayout`.
+00230|    */
+00231|   setGraph(g: CaseGraph, opts?: { relayout?: boolean }): void {
+00232|     const prevPos = new Map<string, cytoscape.Position>();
+00233|     const prevSelected = new Set<string>();
+00234|     this.cy.nodes().forEach((n) => { prevPos.set(n.id(), { ...n.position() }); });
+00235|     this.cy.$(':selected').forEach((n) => { prevSelected.add(n.id()); });
+00236| 
+00237|     this.entityById = new Map(g.nodes.map((n) => [n.id, n]));
+00238| 
+00239|     // node size from pagerank (fallback degree) — 18..40px
+00240|     const pr = g.analysis?.pagerank ?? {};
+00241|     const deg = g.analysis?.degree ?? {};
+00242|     let prMax = 0;
+00243|     for (const v of Object.values(pr)) prMax = Math.max(prMax, v);
+00244|     const sizeOf = (id: string): number => {
+00245|       const v = pr[id] ?? 0;
+00246|       if (prMax > 0 && v > 0) return 18 + 22 * (v / prMax);
+00247|       const d = deg[id] ?? 0;
+00248|       return Math.min(38, 18 + d * 2);
+00249|     };
+00250| 
+00251|     const els: cytoscape.ElementDefinition[] = g.nodes.map((n) => ({
+00252|       group: 'nodes',
+00253|       data: {
+00254|         id: n.id,
+00255|         label: n.label,
+00256|         etype: String(n.etype),
+00257|         color: etypeColor(String(n.etype)),
+00258|         size: sizeOf(n.id),
+00259|       },
+00260|       classes: n.pinned ? 'pinned' : '',
+00261|     }));
+00262|     const seenEdge = new Set<string>();
+00263|     for (const e of g.edges) {
+00264|       if (!this.entityById.has(e.src) || !this.entityById.has(e.dst)) continue;
+00265|       const key = `${e.src}|${e.dst}|${e.rel}`;
+00266|       if (seenEdge.has(key)) continue;
+00267|       seenEdge.add(key);
+00268|       els.push({
+00269|         group: 'edges',
+00270|         data: { id: e.id, source: e.src, target: e.dst, rel: e.rel },
+00271|       });
+00272|     }
+00273| 
+00274|     this.cy.batch(() => {
+00275|       this.cy.elements().remove();
+00276|       this.cy.add(els);
+00277|       if (!opts?.relayout) {
+00278|         this.cy.nodes().forEach((n) => {
+00279|           const p = prevPos.get(n.id());
+00280|           if (p) { n.position(p); return; }
+00281|           // park new nodes near a connected survivor (or the origin)
+00282|           let base: { x: number; y: number } = { x: 0, y: 0 };
+00283|           const firstEdge = n.connectedEdges().first();
+00284|           if (firstEdge.inside()) {
+00285|             const other = firstEdge.connectedNodes().not(n).first();
+00286|             if (other.inside() && other.isNode()) {
+00287|               base = (other as unknown as cytoscape.NodeSingular).position();
+00288|             }
+00289|           }
+00290|           const seed = (n.id().length * 37) % 60;
+00291|           n.position({ x: base.x + seed - 30, y: base.y + ((seed * 7) % 60) - 30 });
+00292|         });
+00293|       }
+00294|     });
+00295| 
+00296|     if (opts?.relayout || prevPos.size === 0) this.runLayout();
+00297|     else this.applyFilters();
+00298| 
+00299|     // restore selection where node survived
+00300|     this.cy.batch(() => {
+00301|       for (const id of prevSelected) {
+00302|         const n = this.cy.getElementById(id);
+00303|         if (n.inside() && n.isNode()) { n.select(); }
+00304|       }
+00305|     });
+00306|   }
+00307| 
+00308|   runLayout(name?: LayoutName): void {
+00309|     if (name) this.layoutName = name;
+00310|     if (this.cy.nodes().length === 0) return;
+00311|     this.applyFilters();
+00312|     const l = this.cy.layout(layoutOpts(this.layoutName));
+00313|     l.one('layoutstop', () => {
+00314|       this.cy.fit(undefined, 48);
+00315|     });
+00316|     l.run();
+00317|   }
+00318| 
+00319|   fit(): void {
+00320|     window.setTimeout(() => {
+00321|       if (this.cy.nodes().length > 0) this.cy.fit(undefined, 48);
+00322|     }, 30);
+00323|   }
+00324| 
+00325|   setFilters(search: string, hiddenEtypes: Set<string>): void {
+00326|     this.filters = { search, hiddenEtypes };
+00327|     this.applyFilters();
+00328|   }
+00329| 
+00330|   applyFilters(): void {
+00331|     const s = this.filters.search.trim().toLowerCase();
+00332|     const hidden = this.filters.hiddenEtypes;
+00333|     this.cy.batch(() => {
+00334|       this.cy.nodes().forEach((n) => {
+00335|         const label = String(n.data('label') ?? '').toLowerCase();
+00336|         const etype = String(n.data('etype') ?? '');
+00337|         const off = hidden.has(etype) || (s.length > 0 && !label.includes(s));
+00338|         n.removeClass('filtered');
+00339|         if (off) n.addClass('filtered');
+00340|       });
+00341|       this.cy.edges().forEach((e) => {
+00342|         e.removeClass('filtered');
+00343|         if (e.source().hasClass('filtered') || e.target().hasClass('filtered')) {
+00344|           e.addClass('filtered');
+00345|         }
+00346|       });
+00347|     });
+00348|   }
+00349| 
+00350|   /** Path mode. ids=null clears. Others get `dim`. */
+00351|   highlightPath(ids: string[] | null): void {
+00352|     const all = this.cy.elements();
+00353|     all.removeClass(['onpath', 'dim', 'anchor']);
+00354|     if (!ids || ids.length === 0) return;
+00355|     const set = new Set(ids);
+00356|     const nodes = this.cy.nodes().filter((n) => set.has(n.id()));
+00357|     const edges = this.cy.edges().filter((e) =>
+00358|       set.has(e.source().id()) && set.has(e.target().id()));
+00359|     const onpath = nodes.union(edges);
+00360|     all.not(onpath).addClass('dim');
+00361|     onpath.addClass('onpath');
+00362|     if (nodes.length > 0) {
+00363|       this.cy.animate({ fit: { eles: nodes, padding: 70 } }, { duration: 250 });
+00364|     }
+00365|   }
+00366| 
+00367|   setAnchor(id: string | null): void {
+00368|     this.cy.nodes().removeClass('anchor');
+00369|     if (id) this.cy.getElementById(id).addClass('anchor');
+00370|   }
+00371| 
+00372|   /** Select + pan to a node (does not fire app navigation). */
+00373|   focus(id: string): void {
+00374|     const n = this.cy.getElementById(id);
+00375|     if (!n.inside()) return;
+00376|     n.select();
+00377|     this.cy.animate({ center: { eles: n } }, { duration: 220 });
+00378|   }
+00379| 
+00380|   clearSelection(): void {
+00381|     this.cy.$(':selected').unselect();
+00382|   }
+00383| }
+00384| 
+
+(End of file - total 384 lines)
+</file>

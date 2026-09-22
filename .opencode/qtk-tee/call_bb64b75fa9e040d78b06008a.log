@@ -1,0 +1,306 @@
+<file>
+00001| /**
+00002|  * Typed API client for the nexus-server HTTP surface (CONTRACT.md §4).
+00003|  * Every fetch is cache: no-store; `{"error": ...}` bodies become ApiError
+00004|  * for the UI to toast.
+00005|  *
+00006|  * Connection settings (browser-local, NOT part of nexus_settings):
+00007|  * - API base — resolved once at module load: `?api=<url>` query param
+00008|  *   (persisted to localStorage) → localStorage `nexus_api_base` → same-origin.
+00009|  *   Lets a statically-hosted UI talk to a remote nexus server.
+00010|  * - Bearer token — localStorage `nexus_token`; attached as
+00011|  *   `Authorization: Bearer <redacted> to every API + SSE request when set
+00012|  *   (server gate: NEXUS_TOKEN env; /api/health stays open).
+00013|  */
+00014| import type {
+00015|   Case, CaseGraph, Entity, EntityDetail, Evidence, Health, LayaRanked,
+00016|   PivotSuggestion, Relation, Task, TimelineEvent, NexusSettings,
+00017| } from './types';
+00018| 
+00019| const LS_API_BASE = 'nexus_api_base';
+00020| const LS_TOKEN = 'nexus_token';
+00021| 
+00022| /** Persist browser-connection fields (settings modal Save). Base change needs a reload. */
+00023| export function saveConnection(apiBase: string, token: string): void {
+00024|   try {
+00025|     localStorage.setItem(LS_API_BASE, normalizeBase(apiBase));
+00026|     localStorage.setItem(LS_TOKEN, token.trim());
+00027|   } catch { /* storage unavailable */ }
+00028| }
+00029| 
+00030| function resolveApiBase(): string {
+00031|   try {
+00032|     const q = new URLSearchParams(window.location.search).get('api');
+00033|     if (q !== null) {
+00034|       const b = normalizeBase(q);
+00035|       localStorage.setItem(LS_API_BASE, b); // sticky: '' = same-origin
+00036|       return b;
+00037|     }
+00038|     return normalizeBase(localStorage.getItem(LS_API_BASE));
+00039|   } catch {
+00040|     return ''; // no storage / no window — same-origin default
+00041|   }
+00042| }
+00043| 
+00044| /** Resolved API base ('' = same-origin). Change requires a reload (settings modal handles it). */
+00045| export const API_BASE: string = resolveApiBase();
+00046| 
+00047| /** Prefix a root-relative path ('/api/…') with the configured base. */
+00048| export function withBase(path: string): string {
+00049|   return `${API_BASE}${path}`;
+00050| }
+00051| 
+00052| /** Same normalization resolveApiBase applies (trim + strip trailing slashes). */
+00053| export function normalizeBase(v: string | null | undefined): string {
+00054|   return (v ?? '').trim().replace(/\/+$/, '');
+00055| }
+00056| 
+00057| /** `Authorization: Bearer <redacted> headers for the nexus server when a token is set. */
+00058| export function authHeaders(): Record<string, string> {
+00059|   try {
+00060|     const token = (localStorage.getItem(LS_TOKEN) ?? '').trim();
+00061|     if (token) return { authorization: `Bearer ${token}` };
+00062|   } catch { /* storage unavailable */ }
+00063|   return {};
+00064| }
+00065| 
+00066| /** Currently stored bearer token ('' = none) — for the settings modal display. */
+00067| export function storedToken(): string {
+00068|   try { return localStorage.getItem(LS_TOKEN) ?? ''; } catch { return ''; }
+00069| }
+00070| 
+00071| export class ApiError extends Error {
+00072|   readonly status: number;
+00073|   constructor(status: number, message: string) {
+00074|     super(message);
+00075|     this.name = 'ApiError';
+00076|     this.status = status;
+00077|   }
+00078| }
+00079| 
+00080| function errFromBody(status: number, body: unknown): ApiError {
+00081|   if (body && typeof body === 'object' && 'error' in body) {
+00082|     const e = (body as { error: unknown }).error;
+00083|     if (typeof e === 'string' && e) return new ApiError(status, e);
+00084|   }
+00085|   return new ApiError(status, `${status} ${STATUS_TEXT[status] ?? ''}`.trim());
+00086| }
+00087| 
+00088| const STATUS_TEXT: Record<number, string> = {
+00089|   400: 'bad request', 401: 'unauthorized', 403: 'forbidden', 404: 'not found',
+00090|   409: 'conflict', 422: 'unprocessable', 500: 'internal error', 502: 'bad gateway',
+00091|   503: 'unavailable',
+00092| };
+00093| 
+00094| async function request<T>(path: string, init?: RequestInit): Promise<T> {
+00095|   const headers: Record<string, string> = { ...authHeaders() };
+00096|   if (init?.headers) {
+00097|     for (const [k, v] of new Headers(init.headers)) headers[k.toLowerCase()] = v;
+00098|   }
+00099|   let res: Response;
+00100|   try {
+00101|     res = await fetch(withBase(`/api${path}`), { cache: 'no-store', ...init, headers });
+00102|   } catch (e) {
+00103|     throw new ApiError(0, `network error — is the nexus server up? (${String(e)})`);
+00104|   }
+00105|   const text = await res.text();
+00106|   let body: unknown = null;
+00107|   if (text.length > 0) {
+00108|     try { body = JSON.parse(text); } catch { body = null; }
+00109|   }
+00110|   if (!res.ok) throw errFromBody(res.status, body);
+00111|   return body as T;
+00112| }
+00113| 
+00114| async function requestText(path: string): Promise<string> {
+00115|   let res: Response;
+00116|   try {
+00117|     res = await fetch(withBase(`/api${path}`), { cache: 'no-store', headers: authHeaders() });
+00118|   } catch (e) {
+00119|     throw new ApiError(0, `network error — is the nexus server up? (${String(e)})`);
+00120|   }
+00121|   const text = await res.text();
+00122|   if (!res.ok) {
+00123|     let body: unknown = null;
+00124|     try { body = JSON.parse(text); } catch { body = null; }
+00125|     throw errFromBody(res.status, body);
+00126|   }
+00127|   return text;
+00128| }
+00129| 
+00130| function json(method: string, payload?: unknown): RequestInit {
+00131|   return {
+00132|     method,
+00133|     headers: { 'content-type': 'application/json' },
+00134|     body: payload === undefined ? undefined : JSON.stringify(payload),
+00135|   };
+00136| }
+00137| 
+00138| const enc = encodeURIComponent;
+00139| 
+00140| export interface NewEntityBody {
+00141|   etype: string;
+00142|   label: string;
+00143|   data?: Record<string, unknown>;
+00144|   confidence?: number;
+00145| }
+00146| 
+00147| export interface NewTaskBody {
+00148|   kind: string;
+00149|   target?: string | null;
+00150|   params?: Record<string, unknown>;
+00151| }
+00152| 
+00153| export const api = {
+00154|   // ---- health / admin -------------------------------------------------
+00155|   health(): Promise<Health> {
+00156|     return request<Health>('/health');
+00157|   },
+00158|   adminConfig(patch: Partial<NexusSettings>): Promise<Record<string, unknown>> {
+00159|     return request<Record<string, unknown>>('/admin/config', json('POST', patch));
+00160|   },
+00161| 
+00162|   // ---- cases -----------------------------------------------------------
+00163|   listCases(): Promise<Case[]> {
+00164|     return request<{ cases: Case[] }>('/cases').then((r) => r.cases);
+00165|   },
+00166|   createCase(body: { name: string; notes?: string; tags?: string[] }): Promise<Case> {
+00167|     return request<{ case: Case }>('/cases', json('POST', body)).then((r) => r.case);
+00168|   },
+00169|   getCase(id: string): Promise<{ case: Case; stats: Record<string, number> }> {
+00170|     return request<{ case: Case; stats: Record<string, number> }>(`/cases/${enc(id)}`);
+00171|   },
+00172|   patchCase(id: string, body: { status?: string; notes?: string }): Promise<Case> {
+00173|     return request<{ case: Case }>(`/cases/${enc(id)}`, json('PATCH', body)).then((r) => r.case);
+00174|   },
+00175|   deleteCase(id: string): Promise<{ ok: boolean }> {
+00176|     return request<{ ok: boolean }>(`/cases/${enc(id)}`, json('DELETE'));
+00177|   },
+00178|   getGraph(caseId: string): Promise<CaseGraph> {
+00179|     return request<CaseGraph>(`/cases/${enc(caseId)}/graph`);
+00180|   },
+00181|   getPath(caseId: string, a: string, b: string): Promise<{ path: string[] | null }> {
+00182|     return request<{ path: string[] | null }>(
+00183|       `/cases/${enc(caseId)}/path?a=${enc(a)}&b=${enc(b)}`,
+00184|     );
+00185|   },
+00186|   getPivots(caseId: string, entityId: string): Promise<{ pivots: PivotSuggestion[] }> {
+00187|     return request<{ pivots: PivotSuggestion[] }>(
+00188|       `/cases/${enc(caseId)}/pivots?entity=${enc(entityId)}`,
+00189|     );
+00190|   },
+00191| 
+00192|   // ---- entities --------------------------------------------------------
+00193|   addEntity(caseId: string, body: NewEntityBody): Promise<{ entity: Entity; deduplicated: boolean }> {
+00194|     return request<{ entity: Entity; deduplicated: boolean }>(
+00195|       `/cases/${enc(caseId)}/entities`, json('POST', body),
+00196|     );
+00197|   },
+00198|   getEntity(id: string): Promise<EntityDetail> {
+00199|     return request<EntityDetail>(`/entities/${enc(id)}`);
+00200|   },
+00201|   patchEntity(id: string, patch: {
+00202|     label?: string; data?: Record<string, unknown>; pinned?: boolean; confidence?: number;
+00203|   }): Promise<Entity> {
+00204|     return request<{ entity: Entity }>(`/entities/${enc(id)}`, json('PATCH', patch)).then((r) => r.entity);
+00205|   },
+00206|   deleteEntity(id: string): Promise<{ ok: boolean }> {
+00207|     return request<{ ok: boolean }>(`/entities/${enc(id)}`, json('DELETE'));
+00208|   },
+00209|   mergeEntity(id: string, other: string): Promise<Entity> {
+00210|     return request<{ entity: Entity }>(`/entities/${enc(id)}/merge`, json('POST', { other }))
+00211|       .then((r) => r.entity);
+00212|   },
+00213| 
+00214|   // ---- relations / evidence / timeline / docs ---------------------------
+00215|   addRelation(body: {
+00216|     case_id: string; src: string; dst: string; rel: string;
+00217|     weight?: number; confidence?: number; source?: string;
+00218|     evidence?: { title?: string; url?: string };
+00219|   }): Promise<Relation> {
+00220|     return request<{ relation: Relation }>('/relations', json('POST', body)).then((r) => r.relation);
+00221|   },
+00222|   deleteRelation(id: string): Promise<{ ok: boolean }> {
+00223|     return request<{ ok: boolean }>(`/relations/${enc(id)}`, json('DELETE'));
+00224|   },
+00225|   addEvidence(body: {
+00226|     case_id: string; subject: string; kind: string;
+00227|     title?: string; url?: string; snippet?: string;
+00228|     raw?: Record<string, unknown>; confidence?: number;
+00229|   }): Promise<Evidence> {
+00230|     return request<{ evidence: Evidence }>('/evidence', json('POST', body)).then((r) => r.evidence);
+00231|   },
+00232|   listEvidence(entityId: string): Promise<Evidence[]> {
+00233|     return request<{ evidence: Evidence[] }>(`/entities/${enc(entityId)}/evidence`).then((r) => r.evidence);
+00234|   },
+00235|   getTimeline(caseId: string): Promise<TimelineEvent[]> {
+00236|     return request<{ events: TimelineEvent[] }>(`/cases/${enc(caseId)}/timeline`).then((r) => r.events);
+00237|   },
+00238|   addTimelineEvent(caseId: string, body: {
+00239|     ts?: string; entity_id?: string | null; kind: string; title: string;
+00240|     detail?: Record<string, unknown>; source?: string;
+00241|   }): Promise<TimelineEvent> {
+00242|     return request<{ event: TimelineEvent }>(`/cases/${enc(caseId)}/timeline`, json('POST', body))
+00243|       .then((r) => r.event);
+00244|   },
+00245|   getDoc(entityId: string): Promise<string> {
+00246|     return request<{ doc: string }>(`/entities/${enc(entityId)}/doc`).then((r) => r.doc);
+00247|   },
+00248|   patchDoc(entityId: string, markdown: string): Promise<string> {
+00249|     return request<{ doc: string }>(`/entities/${enc(entityId)}/doc`, json('PATCH', { markdown }))
+00250|       .then((r) => r.doc);
+00251|   },
+00252|   renderDoc(entityId: string): Promise<string> {
+00253|     return request<{ doc: string }>(`/entities/${enc(entityId)}/doc/render`, json('POST'))
+00254|       .then((r) => r.doc);
+00255|   },
+00256| 
+00257|   // ---- tasks -----------------------------------------------------------
+00258|   createTask(caseId: string, body: NewTaskBody): Promise<Task> {
+00259|     return request<{ task: Task }>(`/cases/${enc(caseId)}/tasks`, json('POST', body), )
+00260|       .then((r) => r.task);
+00261|   },
+00262|   listTasks(caseId?: string): Promise<Task[]> {
+00263|     const q = caseId ? `?case_id=${enc(caseId)}` : '';
+00264|     return request<{ tasks: Task[] }>(`/tasks${q}`).then((r) => r.tasks);
+00265|   },
+00266|   getTask(id: string): Promise<Task> {
+00267|     return request<{ task: Task }>(`/tasks/${enc(id)}`).then((r) => r.task);
+00268|   },
+00269| 
+00270|   // ---- reports / interchange / laya / archon ----------------------------
+00271|   dossierMd(caseId: string): Promise<string> {
+00272|     return requestText(`/cases/${enc(caseId)}/dossier.md`);
+00273|   },
+00274|   briefMd(caseId: string): Promise<string> {
+00275|     return requestText(`/cases/${enc(caseId)}/brief.md`);
+00276|   },
+00277|   exportCase(caseId: string): Promise<unknown> {
+00278|     return request<unknown>(`/cases/${enc(caseId)}/export.json`);
+00279|   },
+00280|   importCase(exportShape: unknown): Promise<Case> {
+00281|     return request<{ case: Case }>('/cases/import', json('POST', exportShape)).then((r) => r.case);
+00282|   },
+00283|   layaTriage(caseId: string): Promise<{ ranked: LayaRanked[]; engine: string }> {
+00284|     return request<{ ranked: LayaRanked[]; engine: string }>('/laya/triage', json('POST', { case_id: caseId }));
+00285|   },
+00286|   archonStatus(): Promise<{ up: boolean; sandboxes: Array<Record<string, unknown>> }> {
+00287|     return request<{ up: boolean; sandboxes: Array<Record<string, unknown>> }>('/archon/status');
+00288|   },
+00289|   archonAsk(body: {
+00290|     question: string; case_id?: string; sandbox?: string; top_k?: number;
+00291|   }): Promise<{ ok: boolean; answer: string; citations: unknown[]; evidence: Evidence | null }> {
+00292|     return request<{ ok: boolean; answer: string; citations: unknown[]; evidence: Evidence | null }>(
+00293|       '/archon/ask', json('POST', body),
+00294|     );
+00295|   },
+00296|   archonPushCase(body: { case_id: string; sandbox?: string }): Promise<{ ok: boolean; sandbox: Record<string, unknown> | null }> {
+00297|     return request<{ ok: boolean; sandbox: Record<string, unknown> | null }>(
+00298|       '/archon/push_case', json('POST', body),
+00299|     );
+00300|   },
+00301| };
+00302| 
+
+(End of file - total 302 lines)
+</file>

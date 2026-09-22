@@ -1,0 +1,6 @@
+webui: NEXUS web UI
+
+Runtime deps: cytoscape.js (MIT), cytoscape-fcose (MIT). Build is fully
+self-contained — no CDN, no external requests. Legal banners are stripped
+from the minified bundle by a local vite plugin; upstream license texts
+live in node_modules and in each package repository.

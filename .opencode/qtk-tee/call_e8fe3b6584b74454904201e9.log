@@ -1,0 +1,267 @@
+<file>
+00001| <file>
+00002| 00001| /** Tiny DOM helpers, toast system, formatting utils. No deps. */
+00003| 00002| 
+00004| 00003| export type Child = Node | string | number | boolean | null | undefined;
+00005| 00004| 
+00006| 00005| export function h(
+00007| 00006|   tag: string,
+00008| 00007|   attrs?: Record<string, unknown> | null,
+00009| 00008|   ...children: Array<Child | Child[]>
+00010| 00009| ): HTMLElement {
+00011| 00010|   const el = document.createElement(tag);
+00012| 00011|   if (attrs) {
+00013| 00012|     for (const [k, v] of Object.entries(attrs)) {
+00014| 00013|       if (v === null || v === undefined || v === false) continue;
+00015| 00014|       if (k === 'class') el.className = String(v);
+00016| 00015|       else if (k === 'text') el.textContent = String(v);
+00017| 00016|       else if (k === 'html') el.innerHTML = String(v); // only with trusted content
+00018| 00017|       else if (k.startsWith('on') && typeof v === 'function') {
+00019| 00018|         el.addEventListener(k.slice(2).toLowerCase(), v as EventListener);
+00020| 00019|       } else if (k === 'dataset' && typeof v === 'object') {
+00021| 00020|         Object.assign(el.dataset, v as Record<string, string>);
+00022| 00021|       } else if (v === true) el.setAttribute(k, '');
+00023| 00022|       else el.setAttribute(k, String(v));
+00024| 00023|     }
+00025| 00024|   }
+00026| 00025|   append(el, children);
+00027| 00026|   return el;
+00028| 00027| }
+00029| 00028| 
+00030| 00029| function append(el: HTMLElement, children: Array<Child | Child[]>): void {
+00031| 00030|   for (const c of children) {
+00032| 00031|     if (c === null || c === undefined || c === false) continue;
+00033| 00032|     if (Array.isArray(c)) { append(el, c); continue; }
+00034| 00033|     el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+00035| 00034|   }
+00036| 00035| }
+00037| 00036| 
+00038| 00037| export function clear(el: HTMLElement): void {
+00039| 00038|   while (el.firstChild) el.removeChild(el.firstChild);
+00040| 00039| }
+00041| 00040| 
+00042| 00041| // ---------------------------------------------------------------- toasts
+00043| 00042| 
+00044| 00043| export type ToastKind = 'info' | 'ok' | 'warn' | 'error';
+00045| 00044| 
+00046| 00045| let toastRoot: HTMLElement | null = null;
+00047| 00046| 
+00048| 00047| function ensureToastRoot(): HTMLElement {
+00049| 00048|   if (!toastRoot) {
+00050| 00049|     toastRoot = h('div', { id: 'toasts', 'aria-live': 'polite' });
+00051| 00050|     document.body.append(toastRoot);
+00052| 00051|   }
+00053| 00052|   return toastRoot;
+00054| 00053| }
+00055| 00054| 
+00056| 00055| let lastToastAt: Record<string, number> = {};
+00057| 00056| 
+00058| 00057| export function toast(msg: string, kind: ToastKind = 'info', ms = 4200): void {
+00059| 00058|   // rate-limit identical messages (e.g. SSE-driven retries)
+00060| 00059|   const now = Date.now();
+00061| 00060|   if (lastToastAt[msg] && now - lastToastAt[msg] < 3000) return;
+00062| 00061|   lastToastAt[msg] = now;
+00063| 00062|   const root = ensureToastRoot();
+00064| 00063|   const t = h('div', { class: `toast toast-${kind}`, role: 'status' },
+00065| 00064|     h('span', { class: 'toast-msg' }, msg),
+00066| 00065|     h('button', {
+00067| 00066|       class: 'toast-x', 'aria-label': 'dismiss', type: 'button',
+00068| 00067|       onclick: () => t.remove(),
+00069| 00068|     }, '✕'),
+00070| 00069|   );
+00071| 00070|   root.append(t);
+00072| 00071|   requestAnimationFrame(() => t.classList.add('in'));
+00073| 00072|   window.setTimeout(() => {
+00074| 00073|     t.classList.remove('in');
+00075| 00074|     window.setTimeout(() => t.remove(), 300);
+00076| 00075|   }, ms);
+00077| 00076|   // gc the rate-limit map
+00078| 00077|   if (Object.keys(lastToastAt).length > 64) lastToastAt = {};
+00079| 00078| }
+00080| 00079| 
+00081| 00080| /** Run a promise; toast errors (esp. ApiError); optional success message. */
+00082| 00081| export async function guarded<T>(
+00083| 00082|   p: Promise<T>,
+00084| 00083|   okMsg?: string | ((result: T) => string),
+00085| 00084| ): Promise<T | undefined> {
+00086| 00085|   try {
+00087| 00086|     const r = await p;
+00088| 00087|     if (okMsg) toast(typeof okMsg === 'function' ? okMsg(r) : okMsg, 'ok');
+00089| 00088|     return r;
+00090| 00089|   } catch (e) {
+00091| 00090|     if (e instanceof Error && e.name === 'AbortError') return undefined;
+00092| 00091|     toast(e instanceof Error ? e.message : String(e), 'error');
+00093| 00092|     return undefined;
+00094| 00093|   }
+00095| 00094| }
+00096| 00095| 
+00097| 00096| // ------------------------------------------------------------ formatting
+00098| 00097| 
+00099| 00098| /** RFC3339 → "YYYY-MM-DD HH:MM" local. */
+00100| 00099| export function fmtTs(iso: string | null | undefined): string {
+00101| 00100|   if (!iso) return '—';
+00102| 00101|   const d = new Date(iso);
+00103| 00102|   if (Number.isNaN(d.getTime())) return iso;
+00104| 00103|   const p = (n: number): string => String(n).padStart(2, '0');
+00105| 00104|   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+00106| 00105|     `${p(d.getHours())}:${p(d.getMinutes())}`;
+00107| 00106| }
+00108| 00107| 
+00109| 00108| export function timeAgo(iso: string | null | undefined): string {
+00110| 00109|   if (!iso) return '—';
+00111| 00110|   const t = new Date(iso).getTime();
+00112| 00111|   if (Number.isNaN(t)) return iso;
+00113| 00112|   const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+00114| 00113|   if (s < 45) return 'just now';
+00115| 00114|   const m = Math.floor(s / 60);
+00116| 00115|   if (m < 60) return `${m}m ago`;
+00117| 00116|   const hr = Math.floor(m / 60);
+00118| 00117|   if (hr < 24) return `${hr}h ago`;
+00119| 00118|   const d = Math.floor(hr / 24);
+00120| 00119|   if (d < 14) return `${d}d ago`;
+00121| 00120|   return fmtTs(iso);
+00122| 00121| }
+00123| 00122| 
+00124| 00123| /** Elapsed between created_at and finished_at (or now), human short. */
+00125| 00124| export function elapsed(created: string, finished?: string | null): string {
+00126| 00125|   const a = new Date(created).getTime();
+00127| 00126|   const b = finished ? new Date(finished).getTime() : Date.now();
+00128| 00127|   if (Number.isNaN(a) || Number.isNaN(b)) return '—';
+00129| 00128|   let s = Math.max(0, Math.floor((b - a) / 1000));
+00130| 00129|   const hr = Math.floor(s / 3600); s -= hr * 3600;
+00131| 00130|   const m = Math.floor(s / 60); s -= m * 60;
+00132| 00131|   if (hr > 0) return `${hr}h${p2(m)}m`;
+00133| 00132|   if (m > 0) return `${m}m${p2(s)}s`;
+00134| 00133|   return `${s}s`;
+00135| 00134| }
+00136| 00135| 
+00137| 00136| function p2(n: number): string { return String(n).padStart(2, '0'); }
+00138| 00137| 
+00139| 00138| export function truncate(s: string, n: number): string {
+00140| 00139|   return s.length > n ? s.slice(0, n - 1) + '…' : s;
+00141| 00140| }
+00142| 00141| 
+00143| 00142| // ---------------------------------------------------------------- modals
+00144| 00143| 
+00145| 00144| /** Generic centered modal. Returns {close}. Backdrop click / Esc close. */
+00146| 00145| export function openModal(
+00147| 00146|   title: string,
+00148| 00147|   build: (body: HTMLElement, close: () => void) => void,
+00149| 00148|   opts?: { wide?: boolean },
+00150| 00149| ): { close: () => void } {
+00151| 00150|   const backdrop = h('div', { class: 'modal-backdrop' });
+00152| 00151|   const close = (): void => {
+00153| 00152|     backdrop.classList.remove('in');
+00154| 00153|     window.setTimeout(() => backdrop.remove(), 150);
+00155| 00154|     document.removeEventListener('keydown', onKey);
+00156| 00155|   };
+00157| 00156|   const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') close(); };
+00158| 00157|   document.addEventListener('keydown', onKey);
+00159| 00158|   const panel = h('div', { class: `modal${opts?.wide ? ' modal-wide' : ''}`, role: 'dialog', 'aria-modal': 'true' },
+00160| 00159|     h('div', { class: 'modal-head' },
+00161| 00160|       h('span', { class: 'panel-label' }, title),
+00162| 00161|       h('button', { class: 'btn btn-ghost btn-sm', onclick: close, 'aria-label': 'close', type: 'button' }, '✕'),
+00163| 00162|     ),
+00164| 00163|     ((): HTMLElement => { const b = h('div', { class: 'modal-body' }); build(b, close); return b; })(),
+00165| 00164|   );
+00166| 00165|   backdrop.append(panel);
+00167| 00166|   backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) close(); });
+00168| 00167|   document.body.append(backdrop);
+00169| 00168|   requestAnimationFrame(() => backdrop.classList.add('in'));
+00170| 00169|   const first = panel.querySelector<HTMLElement>('input, textarea, select, button');
+00171| 00170|   first?.focus();
+00172| 00171|   return { close };
+00173| 00172| }
+00174| 00173| 
+00175| 00174| /** Prompt-style modal with a single text input. Resolves null on cancel. */
+00176| 00175| export function inputModal(
+00177| 00176|   title: string, label: string, placeholder = '',
+00178| 00177| ): Promise<string | null> {
+00179| 00178|   return new Promise((resolve) => {
+00180| 00179|     let done = false;
+00181| 00180|     const finish = (v: string | null): void => {
+00182| 00181|       if (done) return;
+00183| 00182|       done = true;
+00184| 00183|       resolve(v);
+00185| 00184|       m.close();
+00186| 00185|     };
+00187| 00186|     const input = h('input', { class: 'input', placeholder, type: 'text', spellcheck: 'false' }) as HTMLInputElement;
+00188| 00187|     const m = openModal(title, (body, _close) => {
+00189| 00188|       body.append(
+00190| 00189|         h('label', { class: 'field-label' }, label),
+00191| 00190|         input,
+00192| 00191|         h('div', { class: 'row row-end gap8' },
+00193| 00192|           h('button', { class: 'btn', type: 'button', onclick: () => finish(null) }, 'Cancel'),
+00194| 00193|           h('button', {
+00195| 00194|             class: 'btn btn-primary', type: 'button',
+00196| 00195|             onclick: () => finish(input.value.trim()),
+00197| 00196|           }, 'OK'),
+00198| 00197|         ),
+00199| 00198|       );
+00200| 00199|       input.addEventListener('keydown', (e) => {
+00201| 00200|         if (e.key === 'Enter') finish(input.value.trim());
+00202| 00201|       });
+00203| 00202|     });
+00204| 00203|     void m;
+00205| 00204|   });
+00206| 00205| }
+00207| 00206| 
+00208| 00207| /** Native confirm, kept for destructive ops (honest + keyboard accessible). */
+00209| 00208| export function confirmDialog(msg: string): boolean {
+00210| 00209|   return window.confirm(msg);
+00211| 00210| }
+00212| 00211| 
+00213| 00212| // ------------------------------------------------------------ misc utils
+00214| 00213| 
+00215| 00214| export function downloadText(filename: string, text: string, mime = 'text/markdown'): void {
+00216| 00215|   const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+00217| 00216|   const url = URL.createObjectURL(blob);
+00218| 00217|   const a = h('a', { href: url, download: filename }) as HTMLAnchorElement;
+00219| 00218|   document.body.append(a);
+00220| 00219|   a.click();
+00221| 00220|   a.remove();
+00222| 00221|   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+00223| 00222| }
+00224| 00223| 
+00225| 00224| export async function copyText(text: string): Promise<boolean> {
+00226| 00225|   try {
+00227| 00226|     await navigator.clipboard.writeText(text);
+00228| 00227|     return true;
+00229| 00228|   } catch {
+00230| 00229|     try {
+00231| 00230|       const ta = h('textarea', { style: 'position:fixed;opacity:0' }) as HTMLTextAreaElement;
+00232| 00231|       ta.value = text;
+00233| 00232|       document.body.append(ta);
+00234| 00233|       ta.select();
+00235| 00234|       const ok = document.execCommand('copy');
+00236| 00235|       ta.remove();
+00237| 00236|       return ok;
+00238| 00237|     } catch {
+00239| 00238|       return false;
+00240| 00239|     }
+00241| 00240|   }
+00242| 00241| }
+00243| 00242| 
+00244| 00243| /** Debounce helper. */
+00245| 00244| export function debounce<A extends unknown[]>(fn: (...a: A) => void, ms: number): (...a: A) => void {
+00246| 00245|   let t: number | undefined;
+00247| 00246|   return (...a: A) => {
+00248| 00247|     window.clearTimeout(t);
+00249| 00248|     t = window.setTimeout(() => fn(...a), ms);
+00250| 00249|   };
+00251| 00250| }
+00252| 00251| 
+00253| 00252| export function emptyState(msg: string, hint?: string): HTMLElement {
+00254| 00253|   return h('div', { class: 'empty' },
+00255| 00254|     h('div', { class: 'empty-mark' }, '▚ ▚ ▚'),
+00256| 00255|     h('div', { class: 'empty-msg' }, msg),
+00257| 00256|     hint ? h('div', { class: 'empty-hint' }, hint) : null,
+00258| 00257|   );
+00259| 00258| }
+00260| 00259| 
+00261| 
+00262| (End of file - total 259 lines)
+00263| </file>
+
+(End of file - total 263 lines)
+</file>

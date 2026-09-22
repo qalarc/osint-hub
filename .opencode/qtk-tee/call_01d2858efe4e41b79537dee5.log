@@ -1,0 +1,254 @@
+<file>
+00251|         Self {
+00252|             etype,
+00253|             label: label.into(),
+00254|             data: d_obj(),
+00255|             confidence: 1.0,
+00256|             pinned: false,
+00257|         }
+00258|     }
+00259| 
+00260|     pub fn with_data(mut self, data: serde_json::Value) -> Self {
+00261|         self.data = data;
+00262|         self
+00263|     }
+00264| 
+00265|     pub fn with_confidence(mut self, confidence: f64) -> Self {
+00266|         self.confidence = confidence;
+00267|         self
+00268|     }
+00269| }
+00270| 
+00271| /// Input for [`crate::Store::add_relation`].
+00272| #[derive(Debug, Clone, Serialize, Deserialize)]
+00273| pub struct NewRelation {
+00274|     pub case_id: String,
+00275|     pub src: String,
+00276|     pub dst: String,
+00277|     pub rel: String,
+00278|     #[serde(default = "d_one")]
+00279|     pub weight: f64,
+00280|     #[serde(default = "d_one")]
+00281|     pub confidence: f64,
+00282|     pub source: Option<String>,
+00283|     pub evidence: Option<serde_json::Value>,
+00284| }
+00285| 
+00286| impl NewRelation {
+00287|     pub fn new(case_id: impl Into<String>, src: impl Into<String>, dst: impl Into<String>, rel: impl Into<String>) -> Self {
+00288|         Self {
+00289|             case_id: case_id.into(),
+00290|             src: src.into(),
+00291|             dst: dst.into(),
+00292|             rel: rel.into(),
+00293|             weight: 1.0,
+00294|             confidence: 1.0,
+00295|             source: None,
+00296|             evidence: None,
+00297|         }
+00298|     }
+00299| 
+00300|     pub fn with_weight(mut self, weight: f64) -> Self {
+00301|         self.weight = weight;
+00302|         self
+00303|     }
+00304| 
+00305|     pub fn with_confidence(mut self, confidence: f64) -> Self {
+00306|         self.confidence = confidence;
+00307|         self
+00308|     }
+00309| 
+00310|     pub fn with_source(mut self, source: impl Into<String>) -> Self {
+00311|         self.source = Some(source.into());
+00312|         self
+00313|     }
+00314| 
+00315|     pub fn with_evidence(mut self, evidence: serde_json::Value) -> Self {
+00316|         self.evidence = Some(evidence);
+00317|         self
+00318|     }
+00319| }
+00320| 
+00321| /// Input for [`crate::Store::add_evidence`].
+00322| #[derive(Debug, Clone, Serialize, Deserialize)]
+00323| pub struct NewEvidence {
+00324|     pub case_id: String,
+00325|     pub subject: String,
+00326|     pub kind: String,
+00327|     pub title: Option<String>,
+00328|     pub url: Option<String>,
+00329|     pub snippet: Option<String>,
+00330|     #[serde(default = "d_obj")]
+00331|     pub raw: serde_json::Value,
+00332|     #[serde(default = "d_one")]
+00333|     pub confidence: f64,
+00334| }
+00335| 
+00336| impl NewEvidence {
+00337|     pub fn new(case_id: impl Into<String>, subject: impl Into<String>, kind: impl Into<String>) -> Self {
+00338|         Self {
+00339|             case_id: case_id.into(),
+00340|             subject: subject.into(),
+00341|             kind: kind.into(),
+00342|             title: None,
+00343|             url: None,
+00344|             snippet: None,
+00345|             raw: d_obj(),
+00346|             confidence: 1.0,
+00347|         }
+00348|     }
+00349| 
+00350|     pub fn with_title(mut self, title: impl Into<String>) -> Self {
+00351|         self.title = Some(title.into());
+00352|         self
+00353|     }
+00354| 
+00355|     pub fn with_url(mut self, url: impl Into<String>) -> Self {
+00356|         self.url = Some(url.into());
+00357|         self
+00358|     }
+00359| 
+00360|     pub fn with_snippet(mut self, snippet: impl Into<String>) -> Self {
+00361|         self.snippet = Some(snippet.into());
+00362|         self
+00363|     }
+00364| 
+00365|     pub fn with_raw(mut self, raw: serde_json::Value) -> Self {
+00366|         self.raw = raw;
+00367|         self
+00368|     }
+00369| 
+00370|     pub fn with_confidence(mut self, confidence: f64) -> Self {
+00371|         self.confidence = confidence;
+00372|         self
+00373|     }
+00374| }
+00375| 
+00376| /// Input for [`crate::Store::add_timeline`].
+00377| #[derive(Debug, Clone, Serialize, Deserialize)]
+00378| pub struct NewEvent {
+00379|     pub case_id: String,
+00380|     /// `None` → stamped with `now` at insert time.
+00381|     pub ts: Option<String>,
+00382|     pub entity_id: Option<String>,
+00383|     pub kind: String,
+00384|     pub title: String,
+00385|     #[serde(default = "d_obj")]
+00386|     pub detail: serde_json::Value,
+00387|     pub source: Option<String>,
+00388| }
+00389| 
+00390| impl NewEvent {
+00391|     pub fn new(case_id: impl Into<String>, kind: impl Into<String>, title: impl Into<String>) -> Self {
+00392|         Self {
+00393|             case_id: case_id.into(),
+00394|             ts: None,
+00395|             entity_id: None,
+00396|             kind: kind.into(),
+00397|             title: title.into(),
+00398|             detail: d_obj(),
+00399|             source: None,
+00400|         }
+00401|     }
+00402| 
+00403|     pub fn with_ts(mut self, ts: impl Into<String>) -> Self {
+00404|         self.ts = Some(ts.into());
+00405|         self
+00406|     }
+00407| 
+00408|     pub fn with_entity(mut self, entity_id: impl Into<String>) -> Self {
+00409|         self.entity_id = Some(entity_id.into());
+00410|         self
+00411|     }
+00412| 
+00413|     pub fn with_detail(mut self, detail: serde_json::Value) -> Self {
+00414|         self.detail = detail;
+00415|         self
+00416|     }
+00417| 
+00418|     pub fn with_source(mut self, source: impl Into<String>) -> Self {
+00419|         self.source = Some(source.into());
+00420|         self
+00421|     }
+00422| }
+00423| 
+00424| /// Sparse patch for [`crate::Store::update_entity`].
+00425| /// `data` replaces the whole `data` object when present.
+00426| #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+00427| pub struct EntityPatch {
+00428|     pub label: Option<String>,
+00429|     pub data: Option<serde_json::Value>,
+00430|     pub pinned: Option<bool>,
+00431|     pub confidence: Option<f64>,
+00432| }
+00433| 
+00434| /// Result of [`crate::Store::add_entity`] — dedup-aware for the HTTP layer
+00435| /// (`POST /api/cases/{id}/entities` → `{entity, deduplicated}`).
+00436| #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+00437| pub struct AddOutcome {
+00438|     pub entity: Entity,
+00439|     pub deduplicated: bool,
+00440| }
+00441| 
+00442| #[cfg(test)]
+00443| mod tests {
+00444|     use super::*;
+00445| 
+00446|     #[test]
+00447|     fn etype_has_22_fixed_variants_and_round_trips() {
+00448|         assert_eq!(EType::ALL.len(), 22);
+00449|         for e in EType::ALL {
+00450|             assert_eq!(EType::from_str(e.as_str()), Some(e), "round-trip {}", e);
+00451|             let json = serde_json::to_string(&e).unwrap();
+00452|             assert_eq!(json, format!("\"{}\"", e.as_str()));
+00453|             assert_eq!(serde_json::to_string(&e).unwrap(), json);
+00454|             let back: EType = serde_json::from_str(&json).unwrap();
+00455|             assert_eq!(back, e);
+00456|         }
+00457|         assert!(EType::from_str("bogus").is_none());
+00458|         assert!("bogus".parse::<EType>().is_err());
+00459|     }
+00460| 
+00461|     #[test]
+00462|     fn canonical_rels_count() {
+00463|         assert_eq!(CANONICAL_RELS.len(), 16);
+00464|         assert!(CANONICAL_RELS.contains(&"resolves_to"));
+00465|         assert!(CANONICAL_RELS.contains(&"posted_on"));
+00466|     }
+00467| 
+00468|     #[test]
+00469|     fn new_types_have_contract_defaults() {
+00470|         let ne: NewEntity = serde_json::from_str(r#"{"etype":"username","label":"johndoe"}"#).unwrap();
+00471|         assert_eq!(ne.etype, EType::Username);
+00472|         assert_eq!(ne.confidence, 1.0);
+00473|         assert!(!ne.pinned);
+00474|         assert_eq!(ne.data, serde_json::json!({}));
+00475| 
+00476|         let nr: NewRelation = serde_json::from_str(
+00477|             r#"{"case_id":"c_1","src":"e_1","dst":"e_2","rel":"uses","source":"hub:sherlock"}"#,
+00478|         )
+00479|         .unwrap();
+00480|         assert_eq!(nr.weight, 1.0);
+00481|         assert_eq!(nr.confidence, 1.0);
+00482|         assert_eq!(nr.source.as_deref(), Some("hub:sherlock"));
+00483| 
+00484|         let nv: NewEvidence = serde_json::from_str(
+00485|             r#"{"case_id":"c_1","subject":"e_1","kind":"tool_result"}"#,
+00486|         )
+00487|         .unwrap();
+00488|         assert_eq!(nv.confidence, 1.0);
+00489|         assert_eq!(nv.raw, serde_json::json!({}));
+00490|     }
+00491| 
+00492|     #[test]
+00493|     fn entity_json_matches_contract_shape() {
+00494|         let json = r#"{"id":"e_ab12","case_id":"c_1","etype":"username","label":"johndoe","data":{},"confidence":1.0,"pinned":false,"first_seen":"2026-09-22T00:00:00Z","last_seen":"2026-09-22T00:00:00Z"}"#;
+00495|         let e: Entity = serde_json::from_str(json).unwrap();
+00496|         assert_eq!(e.etype, EType::Username);
+00497|         assert_eq!(e.id, "e_ab12");
+00498|     }
+00499| }
+00500| 
+
+(End of file - total 500 lines)
+</file>

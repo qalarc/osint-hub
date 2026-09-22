@@ -1,0 +1,18 @@
+Found 16 matches
+/home/fivelidz/projects/GLM_projects/investigation/qalarc_osint/backend/tools.py:
+  Line 215:         "name": "Sherlock",
+  Line 216:         "kind": "username",
+  Line 223:         "name": "Maigret",
+  Line 224:         "kind": "username",
+  Line 231:         "name": "PhoneInfoga",
+  Line 232:         "kind": "phone",
+  Line 240:         "name": "Holehe",
+  Line 241:         "kind": "email",
+  Line 248:         "name": "Image Discovery",
+  Line 249:         "kind": "image",
+  Line 261:         "name": "Ignorant",
+  Line 262:         "kind": "phone",
+  Line 269:         "name": "SearchPhone",
+  Line 270:         "kind": "phone",
+  Line 289:                 "name": spec["name"],
+  Line 290:                 "kind": spec["kind"],

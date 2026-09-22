@@ -1,0 +1,221 @@
+<file>
+00001| /**
+00002|  * Guide tab: the in-app field handbook, one long markdown document rendered
+00003|  * through md.ts (which gives h2/h3 slug ids). A sticky in-page TOC is built
+00004|  * from the generated ids. Static content — no server calls, no refresh().
+00005|  */
+00006| import { h } from './dom';
+00007| import { renderMarkdownInto } from './md';
+00008| 
+00009| const GUIDE_MD = `# NEXUS field guide
+00010| 
+00011| NEXUS is an investigation workbench for **authorized-use OSINT**: you point it
+00012| only at subjects and platforms you are permitted to inspect, and it keeps the
+00013| receipts for everything it collects. This handbook covers both layers of the
+00014| system and every surface of this UI. Reading time is about five minutes — and
+00015| the walkthrough below really is that fast in practice.
+00016| 
+00017| ## NEXUS in one minute
+00018| 
+00019| Two layers, one pipeline:
+00020| 
+00021| - **The OSINT hub** (root app, port 8799) finds raw footprint. Give it a
+00022|   username, phone number, email address or image URL and it fans out through
+00023|   the toolchain — \`sherlock\` + \`maigret\` sweep a username across social
+00024|   platforms, \`phoneinfoga\` + \`ignorant\` produce phone intel and
+00025|   registration checks, \`holehe\` finds where an email is registered, and
+00026|   \`revimg\` discovers pages where an image appears.
+00027| - **NEXUS** (this workbench, port 8801) turns those findings into an evidence
+00028|   graph. Every hit becomes an entity; entities get typed relations; every
+00029|   claim carries provenance — which tool produced it, and the URL it came
+00030|   from. On top of the graph you get wiki docs, dossiers, article briefs, and
+00031|   a handoff path to archon for cited drafting.
+00032| 
+00033| Hub = collection. NEXUS = case file. Nothing is asserted without a source row
+00034| behind it.
+00035| 
+00036| ## Your first investigation (5 minutes)
+00037| 
+00038| 1. **① New case** — in the left rail, type a name into the "new case name…"
+00039|    field and press Enter. The case owns everything that follows.
+00040| 2. **② Add a seed entity** — pick an etype in the add-entity form (defaults
+00041|    to \`username\`) and give it a label, e.g. \`janedoe\`. The node appears in
+00042|    the graph immediately.
+00043| 3. **③ Hub scan** — click the node to open it in the inspector, find ACTIONS,
+00044|    press "▶ hub scan". This runs the sherlock+maigret sweep via the hub, and
+00045|    every hit is ingested automatically as entities + \`uses\` relations +
+00046|    evidence rows carrying tool and URL provenance. No copy-pasting.
+00047| 4. **④ Watch it live** — the console strip along the bottom lists tasks.
+00048|    Click a row to expand its per-task SSE log stream while the sweep runs;
+00049|    ingested counts land on the task row when it finishes.
+00050| 5. **⑤ Read the graph** — back in the Graph tab, nodes are colored by type
+00051|    (the chips above the graph are the color map and double as hide/show
+00052|    filters). Shift-click two nodes to highlight the shortest connection path
+00053|    between them; Esc clears it.
+00054| 6. **⑥ Analyze** — the Analysis tab ranks PageRank centrality (who matters
+00055|    in this graph), groups communities (clusters of closely related entities),
+00056|    and deals pivot cards: next-best actions computed from the graph shape,
+00057|    each runnable with one click.
+00058| 7. **⑦ Write it up** — in the inspector, switch to WIKI DOC and hit render.
+00059|    The skeleton auto-fills the Connections / Timeline / Sources sections from
+00060|    the graph; your prose under Summary and Open questions is preserved on
+00061|    every regeneration.
+00062| 8. **⑧ Draft for publication** — the Story tab renders Dossier.md (findings
+00063|    with an evidence appendix) and an article brief: lede angles, a nut graf,
+00064|    a claim ledger where every claim is tagged Supported / Single-source /
+00065|    Unverified, and the source list behind them.
+00066| 9. **⑨ Hand off** — "⇪ push case to archon" seeds a canon sandbox with the
+00067|    case, so drafting in archon stays grounded in this evidence, citations
+00068|    included.
+00069| 
+00070| ## Connectors
+00071| 
+00072| Connectors are the server's outboards; their health shows as dots in the left
+00073| rail. \`up\` is green. \`down\` means configured but unreachable (red) — its
+00074| tasks fail fast with a clear error while everything else keeps working.
+00075| \`unset\` means not configured (gray): the connector's actions simply are not
+00076| offered. Degradation is graceful by design.
+00077| 
+00078| | connector | what it does | needs |
+00079| | --- | --- | --- |
+00080| | hub | username / phone / email / image scans via the qalarc OSINT hub (sherlock, maigret, phoneinfoga, ignorant, holehe, revimg) | hub_url, optional hub_token |
+00081| | flowsint | subdomain, WHOIS, ASN, breach and crypto enrichers | flowsint_url pointing at a running flowsint instance |
+00082| | openplanter | recursive AI agent deep-dives seeded from a node | openplanter-agent binary on PATH |
+00083| | archon | canon / RAG grounding — evidence push, cited answers | archon_url |
+00084| | laya | local fine-tuned decision model for lead triage | laya_url (empty = heuristic) |
+00085| | jev | TypeSafe calibrated decision engine (remote) | jev_url + jev_api_key |
+00086| 
+00087| Set FLOWSINT_URL (or the matching Settings field) to a running flowsint
+00088| instance to enable its enrichers; openplanter needs the agent binary
+00089| discoverable on PATH unless you set the path explicitly in Settings.
+00090| 
+00091| ## Calibrated decisions (jev → laya → heuristic)
+00092| 
+00093| Where the workbench has to rank things — chiefly lead triage in Analysis —
+00094| it walks a fixed chain and takes the first link that answers:
+00095| 
+00096| 1. **jev** — remote and calibrated. Set jev_url and jev_api_key in Settings
+00097|    and it works instantly, returning probabilities with honest confidence.
+00098| 2. **laya** — local and trainable. Every decision it serves is appended to
+00099|    laya-decisions.jsonl, so you can fine-tune the model on your own verdicts
+00100|    and redeploy it.
+00101| 3. **heuristic** — a graph-shaped fallback (centrality, degree, recency).
+00102|    Never configured, never down.
+00103| 
+00104| ### The merge gate
+00105| 
+00106| The inspector's merge flow offers candidate duplicates for an entity.
+00107| Confirming one runs a same-entity check (jaro-winkler similarity on labels):
+00108| **≥ 0.8** produces an auto-merge offer, **0.5–0.8** is flagged for human
+00109| review, and **< 0.5** is treated as distinct. A confirmed merge re-points
+00110| relations, keeps a \`same_as\` edge, and writes an audit entry — nothing is
+00111| silently rewritten.
+00112| 
+00113| ## Tabs reference
+00114| 
+00115| - **Graph** — the evidence map. Nodes colored by etype (chips are legend and
+00116|   filters), label search, force / grid / circle layouts, fit view.
+00117|   Shift-click two nodes for the shortest connection path.
+00118| - **Console** — task queue with status, ingested entity / relation / evidence
+00119|   counts, and expandable per-task SSE logs (the last 500 lines are kept).
+00120| - **Timeline** — case chronology. Ingested milestones land here; add manual
+00121|   events with a kind, title, optional entity link and source.
+00122| - **Analysis** — PageRank centrality table, communities, pivot cards,
+00123|   laya-ranked leads.
+00124| - **Story** — Dossier.md and the article brief, with copy / download buttons
+00125|   and push-to-archon.
+00126| 
+00127| ## Desktop & hosting
+00128| 
+00129| - **Desktop app (Tauri)** — from the repository's \`nexus/\` directory:
+00130|   \`cargo run -p nexus-tauri --features desktop\`.
+00131| - **Server-only** — \`scripts/run_nexus.sh\` builds and serves UI + API on
+00132|   \`127.0.0.1:8801\`.
+00133| - **Hosting tiers** — localhost is tier zero. For a shareable URL, a quick
+00134|   tunnel: \`cloudflared tunnel --url http://127.0.0.1:8801\`. For a stable
+00135|   subdomain, run a named cloudflared tunnel and put Cloudflare Access in
+00136|   front of it. For a static showcase, host the built UI anywhere and point it
+00137|   at the server with the API-base override: open the page once with
+00138|   \`?api=<server-url>\` or set nexus_api_base in Settings. The server must
+00139|   allow the UI's origin in its CORS config for a cross-origin showcase to
+00140|   connect. If the server runs
+00141|   with NEXUS_TOKEN set, put that token in nexus_token (Settings) and every
+00142|   request — API and SSE alike — carries it as a bearer header.
+00143| 
+00144| ## Settings & keys
+00145| 
+00146| The gear icon (top right) opens the settings modal. Connector fields are
+00147| stored in this browser (localStorage \`nexus_settings\`) **and** applied to
+00148| the server via POST /api/admin/config; environment variables remain the
+00149| defaults and empty fields are sent as null. Secrets are redacted in responses
+00150| — you only ever see whether they are set. The two connection fields stay in
+00151| this browser only.
+00152| 
+00153| | field | what it does |
+00154| | --- | --- |
+00155| | hub_url | OSINT hub endpoint (default 127.0.0.1:8799) |
+00156| | hub_token | bearer token if the hub requires one |
+00157| | flowsint_url | flowsint enrichers endpoint; unset disables them |
+00158| | openplanter_bin | openplanter-agent binary (auto-discovered on PATH) |
+00159| | archon_url | archon canon / RAG endpoint |
+00160| | laya_url | local laya decision server; empty = heuristic only |
+00161| | jev_url | TypeSafe decision engine endpoint |
+00162| | jev_api_key | TypeSafe API key — enables calibrated jev decisions |
+00163| | nexus_api_base | browser-only: where this UI finds the API (empty = same-origin) |
+00164| | nexus_token | browser-only: bearer token for NEXUS_TOKEN-gated servers |
+00165| 
+00166| /api/health stays open even when the token gate is on, so the rail can show
+00167| connector state without credentials.
+00168| 
+00169| ## Ethics & privacy
+00170| 
+00171| This is a tool for **authorized-use OSINT**: investigate subjects you have
+00172| the right and the mandate to investigate — your own footprint, consented
+00173| research, or engagements with a written scope. Results are investigative
+00174| leads with provenance, not proof; that is exactly why the claim ledger exists
+00175| with Supported / Single-source / Unverified statuses, so journalism stays
+00176| honest about what any one source supports. Only public footprint is
+00177| collected, and only on request. Respect platform terms and local law. The
+00178| full data-handling statement lives in PRIVACY.md at the repository root.
+00179| `;
+00180| 
+00181| export class GuidePane {
+00182|   readonly el: HTMLElement;
+00183| 
+00184|   constructor() {
+00185|     const md = h('div', { class: 'md guide-md' });
+00186|     renderMarkdownInto(md, GUIDE_MD);
+00187| 
+00188|     // sticky in-page TOC from the slug ids md.ts generates for h2/h3
+00189|     const tocLinks: HTMLElement[] = [];
+00190|     for (const hd of Array.from(md.querySelectorAll('h2[id], h3[id]'))) {
+00191|       const a = h('a', {
+00192|         class: `toc-l${hd.tagName === 'H3' ? ' toc-l3' : ''}`,
+00193|         href: `#${hd.id}`,
+00194|         title: hd.textContent ?? hd.id,
+00195|       }, hd.textContent ?? hd.id);
+00196|       a.addEventListener('click', (e) => {
+00197|         e.preventDefault();
+00198|         try { history.replaceState(null, '', `#${hd.id}`); } catch { /* file:// quirks */ }
+00199|         hd.scrollIntoView({ behavior: 'smooth', block: 'start' });
+00200|       });
+00201|       tocLinks.push(a);
+00202|     }
+00203|     const toc = h('nav', { class: 'guide-toc', 'aria-label': 'guide table of contents' },
+00204|       h('span', { class: 'panel-label' }, 'contents'),
+00205|       h('div', { class: 'guide-toc-links' }, tocLinks),
+00206|     );
+00207| 
+00208|     this.el = h('section', { class: 'pane', id: 'pane-guide', hidden: true },
+00209|       h('header', { class: 'pane-head' },
+00210|         h('span', { class: 'panel-label' }, 'guide'),
+00211|         h('span', { class: 'muted small' }, 'field handbook — both layers, end to end'),
+00212|       ),
+00213|       h('div', { class: 'pane-body guide-body' }, toc, md),
+00214|     );
+00215|   }
+00216| }
+00217| 
+
+(End of file - total 217 lines)
+</file>

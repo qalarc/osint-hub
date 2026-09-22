@@ -1,0 +1,34 @@
+[package]
+name = "nexus-tauri"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Nexus desktop shell (Tauri 2): embeds the nexus server + workbench UI"
+build = "build.rs"
+
+[dependencies]
+nexus-server = { path = "../nexus-server" }
+nexus-core = { path = "../nexus-core" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# tauri is enabled via the `desktop` feature so `cargo check` works even on
+# machines without webkit2gtk; the real GUI build uses --features desktop.
+tauri = { version = "2", optional = true }
+# MUST match nexus-server's axum major.minor (0.7) so Router types unify.
+axum = { version = "0.7", optional = true }
+
+[build-dependencies]
+tauri-build = { version = "2", optional = true }
+
+[features]
+default = []
+desktop = ["dep:tauri", "dep:axum", "dep:tauri-build"]
+
+[[bin]]
+name = "nexus-tauri"
+path = "src/main.rs"

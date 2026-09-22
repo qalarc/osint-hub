@@ -1,0 +1,208 @@
+<file>
+00001| /**
+00002|  * Minimal in-house markdown renderer (no deps).
+00003|  * Supports: h1–h6, bold/italic/strike, inline + fenced code, links,
+00004|  * pipe tables, hr, ordered/unordered lists (with nesting), paragraphs.
+00005|  * Everything is HTML-escaped before inline transforms; link schemes are
+00006|  * whitelisted (http/https/mailto/relative). Returns an HTML string.
+00007|  */
+00008| 
+00009| const ESC_MAP: Record<string, string> = {
+00010|   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+00011| };
+00012| 
+00013| function esc(s: string): string {
+00014|   return s.replace(/[&<>"']/g, (c) => ESC_MAP[c] ?? c);
+00015| }
+00016| 
+00017| function safeUrl(href: string): string | null {
+00018|   const t = href.trim();
+00019|   if (/^https?:\/\//i.test(t)) return t;
+00020|   if (/^mailto:[^\s@]+@[^\s@]+$/i.test(t)) return t;
+00021|   if (/^\/(?!\/)/.test(t)) return t; // same-origin relative, not protocol-relative
+00022|   if (/^#[\w-]*$/.test(t)) return t;
+00023|   return null;
+00024| }
+00025| 
+00026| interface CodeSpan { placeholder: string; html: string }
+00027| 
+00028| function inline(raw: string): string {
+00029|   let s = esc(raw);
+00030|   const codes: CodeSpan[] = [];
+00031|   s = s.replace(/`([^`\n]+)`/g, (_m, c: string) => {
+00032|     const ph = `\u0000${codes.length}\u0000`;
+00033|     codes.push({ placeholder: ph, html: `<code>${c}</code>` });
+00034|     return ph;
+00035|   });
+00036|   // links: [text](url)
+00037|   s = s.replace(/\[([^\]\n]*)\]\(([^)\s]+)\)/g, (_m, text: string, href: string) => {
+00038|     const url = safeUrl(href);
+00039|     if (!url) return text;
+00040|     return `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+00041|   });
+00042|   // auto-link bare urls — intentional: only http(s), keeps dossiers clickable
+00043|   s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (_m, pre: string, url: string) =>
+00044|     `${pre}<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
+00045|   s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+00046|   s = s.replace(/(^|[^\w*])\*([^*\n]+)\*(?=[^\w*]|$)/g, '$1<em>$2</em>');
+00047|   s = s.replace(/(^|\s)_([^_\n]+)_(?=\s|[.,;:!?)]|$)/g, '$1<em>$2</em>');
+00048|   s = s.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
+00049|   for (const c of codes) s = s.split(c.placeholder).join(c.html);
+00050|   return s;
+00051| }
+00052| 
+00053| const HR_RE = /^\s{0,3}(?:-[^\S\n]*-[^\S\n]*-|_[^\S\n]*_[^\S\n]*_|\*[^\S\n]*\*[^\S\n]*\*)[\s*_-]*$/;
+00054| const LIST_ITEM_RE = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
+00055| const TABLE_SEP_RE = /^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
+00056| 
+00057| function splitRow(line: string): string[] {
+00058|   let t = line.trim();
+00059|   if (t.startsWith('|')) t = t.slice(1);
+00060|   if (t.endsWith('|')) t = t.slice(0, -1);
+00061|   return t.split('|').map((c) => c.trim());
+00062| }
+00063| 
+00064| function parseList(lines: string[], start: number): { html: string; next: number } {
+00065|   const out: string[] = [];
+00066|   const stack: Array<{ indent: number; ordered: boolean }> = [];
+00067|   const closeTop = (): void => {
+00068|     const top = stack.pop();
+00069|     if (top) out.push(top.ordered ? '</ol>' : '</ul>');
+00070|   };
+00071|   let i = start;
+00072|   for (; i < lines.length; i++) {
+00073|     const m = LIST_ITEM_RE.exec(lines[i]);
+00074|     if (!m) break;
+00075|     const indent = m[1].replace(/\t/g, '  ').length;
+00076|     const ordered = /\d/.test(m[2][0]);
+00077|     const content = inline(m[3]);
+00078|     for (;;) {
+00079|       if (stack.length === 0) {
+00080|         stack.push({ indent, ordered });
+00081|         out.push(ordered ? '<ol>' : '<ul>');
+00082|         break;
+00083|       }
+00084|       const top = stack[stack.length - 1];
+00085|       if (indent > top.indent + 1) {
+00086|         stack.push({ indent, ordered });
+00087|         out.push(ordered ? '<ol>' : '<ul>');
+00088|         continue;
+00089|       }
+00090|       if (indent < top.indent - 1 || (indent <= top.indent - 1)) { closeTop(); continue; }
+00091|       break;
+00092|     }
+00093|     out.push(`<li>${content}</li>`);
+00094|   }
+00095|   while (stack.length > 0) closeTop();
+00096|   return { html: out.join(''), next: i };
+00097| }
+00098| 
+00099| export function renderMarkdown(src: string): string {
+00100|   const lines = src.replace(/\r\n?/g, '\n').split('\n');
+00101|   const out: string[] = [];
+00102|   let i = 0;
+00103|   let para: string[] = [];
+00104| 
+00105|   const flushPara = (): void => {
+00106|     if (para.length > 0) {
+00107|       out.push(`<p>${inline(para.join(' '))}</p>`);
+00108|       para = [];
+00109|     }
+00110|   };
+00111| 
+00112|   while (i < lines.length) {
+00113|     const line = lines[i];
+00114| 
+00115|     if (!line.trim()) { flushPara(); i++; continue; }
+00116| 
+00117|     // fenced code
+00118|     const fence = /^\s*```(.*)$/.exec(line);
+00119|     if (fence) {
+00120|       flushPara();
+00121|       const lang = fence[1].trim();
+00122|       const body: string[] = [];
+00123|       i++;
+00124|       while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) {
+00125|         body.push(lines[i]);
+00126|         i++;
+00127|       }
+00128|       i++; // closing fence (or EOF)
+00129|       const cls = lang ? ` class="lang-${esc(lang)}"` : '';
+00130|       out.push(`<pre><code${cls}>${esc(body.join('\n'))}</code></pre>`);
+00131|       continue;
+00132|     }
+00133| 
+00134|     // heading
+00135|     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+00136|     if (heading) {
+00137|       flushPara();
+00138|       const lvl = heading[1].length;
+00139|       out.push(`<h${lvl}>${inline(heading[2])}</h${lvl}>`);
+00140|       i++;
+00141|       continue;
+00142|     }
+00143| 
+00144|     // hr
+00145|     if (HR_RE.test(line)) {
+00146|       flushPara();
+00147|       out.push('<hr>');
+00148|       i++;
+00149|       continue;
+00150|     }
+00151| 
+00152|     // table (header row + separator row)
+00153|     if (line.includes('|') && i + 1 < lines.length && TABLE_SEP_RE.test(lines[i + 1])) {
+00154|       flushPara();
+00155|       const header = splitRow(line);
+00156|       i += 2;
+00157|       const rows: string[][] = [];
+00158|       while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+00159|         rows.push(splitRow(lines[i]));
+00160|         i++;
+00161|       }
+00162|       const th = header.map((c) => `<th>${inline(c)}</th>`).join('');
+00163|       const trs = rows.map((r) => {
+00164|         const tds = header.map((_, ci) => `<td>${inline(r[ci] ?? '')}</td>`).join('');
+00165|         return `<tr>${tds}</tr>`;
+00166|       }).join('');
+00167|       out.push(`<div class="md-table-wrap"><table><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table></div>`);
+00168|       continue;
+00169|     }
+00170| 
+00171|     // lists
+00172|     if (LIST_ITEM_RE.test(line)) {
+00173|       flushPara();
+00174|       const res = parseList(lines, i);
+00175|       out.push(res.html);
+00176|       i = res.next;
+00177|       continue;
+00178|     }
+00179| 
+00180|     // blockquote (simple: consecutive > lines)
+00181|     if (/^\s{0,3}>\s?/.test(line)) {
+00182|       flushPara();
+00183|       const body: string[] = [];
+00184|       while (i < lines.length && /^\s{0,3}>\s?/.test(lines[i])) {
+00185|         body.push(lines[i].replace(/^\s{0,3}>\s?/, ''));
+00186|         i++;
+00187|       }
+00188|       out.push(`<blockquote><p>${inline(body.join(' '))}</p></blockquote>`);
+00189|       continue;
+00190|     }
+00191| 
+00192|     // paragraph line
+00193|     para.push(line.trim());
+00194|     i++;
+00195|   }
+00196|   flushPara();
+00197|   return out.join('\n');
+00198| }
+00199| 
+00200| /** Render markdown into an element (safe: escaped + scheme-whitelisted). */
+00201| export function renderMarkdownInto(el: HTMLElement, src: string): void {
+00202|   el.innerHTML = renderMarkdown(src);
+00203| }
+00204| 
+
+(End of file - total 204 lines)
+</file>

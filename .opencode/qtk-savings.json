@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "ts": 1790071634173,
+  "project": "/home/fivelidz/projects/GLM_projects/investigation/qalarc_osint",
+  "session_id": "unknown",
+  "totals": {
+    "calls": 14,
+    "bytes_in": 174384,
+    "bytes_out": 21762,
+    "tokens_in": 43603,
+    "tokens_out": 5447,
+    "tokens_saved": 38156,
+    "bytes_saved": 152622,
+    "usd_saved": 0.114468,
+    "model": "default",
+    "pricing": {
+      "inputUsdPer1M": 3,
+      "outputUsdPer1M": 15,
+      "cacheReadUsdPer1M": 0.3
+    }
+  },
+  "by_compressor": [
+    {
+      "name": "tool-read",
+      "calls": 13,
+      "tokens_saved": 37988,
+      "bytes_saved": 151952
+    },
+    {
+      "name": "tool-grep",
+      "calls": 1,
+      "tokens_saved": 168,
+      "bytes_saved": 670
+    }
+  ],
+  "last_compression_ts": 1790071632702
+}

@@ -1,0 +1,261 @@
+<file>
+00161|             "error": "connected hub is lite mode (edge) — only username checks and phone pivots are available; start the full backend for this scan",
+00162|             "hub": base,
+00163|         }
+00164|     r = _http(
+00165|         "POST",
+00166|         base + "/api/scan",
+00167|         {
+00168|             "type": "multi",
+00169|             "value": value,
+00170|             "tools": _ALL_TOOLS,
+00171|             "options": {"timeout": 10},
+00172|         },
+00173|     )
+00174|     if "job_id" not in r:
+00175|         return {"error": "scan rejected", "detail": r}
+00176|     job = _wait_job(base, r["job_id"], max_wait)
+00177|     d = _digest(job)
+00178|     d["hub"] = base
+00179|     return d
+00180| 
+00181| 
+00182| def _lite_or_full_case(
+00183|     username=None, phone=None, email=None, image_url=None, max_wait=180.0
+00184| ) -> dict:
+00185|     value = {
+00186|         k: v
+00187|         for k, v in {
+00188|             "username": username,
+00189|             "phone": phone,
+00190|             "email": email,
+00191|             "image": image_url,
+00192|         }.items()
+00193|         if v
+00194|     }
+00195|     if not value:
+00196|         return {"error": "provide at least one of: username, phone, email, image_url"}
+00197|     base, mode = _resolve()
+00198|     if base is None:
+00199|         return {
+00200|             "error": "no OSINT hub reachable — start the backend (scripts/run.sh) or set OSINT_HUB_URL"
+00201|         }
+00202|     if mode == "full":
+00203|         return _full_scan(value, max_wait)
+00204|     # ---- lite mode: synchronous edge endpoints ----
+00205|     out = {"hub": base, "mode": "lite", "subjects": {}}
+00206|     if value.get("username"):
+00207|         try:
+00208|             r = _http(
+00209|                 "POST",
+00210|                 base + "/api/lite/check",
+00211|                 {"value": value["username"]},
+00212|                 timeout=60,
+00213|             )
+00214|             out["subjects"]["username"] = {
+00215|                 "value": value["username"],
+00216|                 "tools": {
+00217|                     "cloudcheck": {
+00218|                         "status": "done",
+00219|                         "found_count": len(r.get("found", [])),
+00220|                         "found": r.get("found", [])[:60],
+00221|                     }
+00222|                 },
+00223|             }
+00224|         except Exception as exc:
+00225|             out["subjects"]["username"] = {"error": str(exc)[:200]}
+00226|     if value.get("phone"):
+00227|         try:
+00228|             r = _http(
+00229|                 "POST", base + "/api/lite/pivots", {"value": value["phone"]}, timeout=30
+00230|             )
+00231|             info = r.get("info", [])
+00232|             out["subjects"]["phone"] = {
+00233|                 "value": value["phone"],
+00234|                 "tools": {
+00235|                     "pivots": {
+00236|                         "status": "done",
+00237|                         "facts": {i["key"]: i["value"] for i in info if i.get("value")},
+00238|                         "search_pivots": [i.get("url") for i in info if i.get("url")][
+00239|                             :20
+00240|                         ],
+00241|                     }
+00242|                 },
+00243|             }
+00244|         except Exception as exc:
+00245|             out["subjects"]["phone"] = {"error": str(exc)[:200]}
+00246|     if value.get("email"):
+00247|         out["subjects"]["email"] = {
+00248|             "error": "email checks (holehe) need the full backend"
+00249|         }
+00250|     if value.get("image"):
+00251|         out["subjects"]["image"] = {
+00252|             "error": "image discovery (revimg) needs the full backend"
+00253|         }
+00254|     return out
+00255| 
+00256| 
+00257| # ---------------------------------------------------------------- local tools
+00258| def _pivot_urls(topic: str, kind: str) -> dict:
+00259|     q = urllib.parse.quote_plus(topic)
+00260|     quoted = urllib.parse.quote_plus(f'"{topic}"')
+00261|     links = [
+00262|         ("google", f"https://www.google.com/search?q={q}"),
+00263|         ("bing", f"https://www.bing.com/search?q={q}"),
+00264|         ("duckduckgo", f"https://duckduckgo.com/?q={q}"),
+00265|         ("google-news", f"https://news.google.com/search?q={q}"),
+00266|         ("wikipedia", f"https://en.wikipedia.org/w/index.php?search={q}"),
+00267|         ("reddit", f"https://www.google.com/search?q=site%3Areddit.com+{q}"),
+00268|         ("youtube", f"https://www.youtube.com/results?search_query={q}"),
+00269|     ]
+00270|     if kind == "person":
+00271|         socials = [
+00272|             "facebook.com",
+00273|             "instagram.com",
+00274|             "linkedin.com",
+00275|             "x.com",
+00276|             "tiktok.com",
+00277|             "tinder.com/@{u}",
+00278|         ]
+00279|         person = (
+00280|             topic.split()[0] if " " not in topic else topic.split()[-1]
+00281|         )  # last name guess
+00282|         username_guess = "".join(c for c in topic.lower() if c.isalnum())[:20]
+00283|         for s in socials[:5]:
+00284|             links.append(
+00285|                 (
+00286|                     f"google-site:{s}",
+00287|                     f"https://www.google.com/search?q={quoted}+site%3A{s}",
+00288|                 )
+00289|             )
+00290|         links += [
+00291|             ("exact-phrase", f"https://www.google.com/search?q={quoted}"),
+00292|             (
+00293|                 "username-guess",
+00294|                 f"https://osint.qalarc.com/#case (scan username: {username_guess})",
+00295|             ),
+00296|             ("tinder-handle-guess", f"https://tinder.com/@{username_guess}"),
+00297|             (
+00298|                 "maigret-dating",
+00299|                 "ask agent: osint_dating(username) with the full backend",
+00300|             ),
+00301|         ]
+00302|     return {
+00303|         "topic": topic,
+00304|         "kind": kind,
+00305|         "pivots": [{"engine": e, "url": u} for e, u in links],
+00306|     }
+00307| 
+00308| 
+00309| # ---------------------------------------------------------------- MCP tools
+00310| @mcp.tool()
+00311| def osint_status() -> dict:
+00312|     """Which OSINT hub is connected: base URL, mode (full/lite), installed tools."""
+00313|     base, mode = _resolve()
+00314|     if base is None:
+00315|         return {
+00316|             "connected": False,
+00317|             "hint": "start the backend (scripts/run.sh) or set OSINT_HUB_URL; lite fallback https://osint.qalarc.com",
+00318|         }
+00319|     try:
+00320|         tools = {
+00321|             t["id"]: t["installed"]
+00322|             for t in _http("GET", base + "/api/tools").get("tools", [])
+00323|         }
+00324|     except Exception:
+00325|         tools = {}
+00326|     return {"connected": True, "hub": base, "mode": mode, "tools": tools}
+00327| 
+00328| 
+00329| @mcp.tool()
+00330| def osint_case(
+00331|     username: str | None = None,
+00332|     phone: str | None = None,
+00333|     email: str | None = None,
+00334|     image_url: str | None = None,
+00335|     max_wait: float = 180.0,
+00336| ) -> dict:
+00337|     """Full case scan — any mix of username, phone, email, image URL.
+00338|     Full backend: sherlock+maigret (accounts), phoneinfoga+ignorant (phone facts),
+00339|     holehe (email registrations), revimg (pages where the image appears).
+00340|     Lite mode: username checks + phone pivots only."""
+00341|     return _lite_or_full_case(username, phone, email, image_url, max_wait)
+00342| 
+00343| 
+00344| @mcp.tool()
+00345| def osint_username(username: str, max_wait: float = 180.0) -> dict:
+00346|     """Find accounts for a username across platforms (sherlock+maigret / edge cloudcheck)."""
+00347|     return _lite_or_full_case(username=username, max_wait=max_wait)
+00348| 
+00349| 
+00350| @mcp.tool()
+00351| def osint_phone(phone: str, max_wait: float = 120.0) -> dict:
+00352|     """Phone intelligence: number facts, country/carrier (full) + search pivots; registrations (ignorant)."""
+00353|     return _lite_or_full_case(phone=phone, max_wait=max_wait)
+00354| 
+00355| 
+00356| @mcp.tool()
+00357| def osint_email(email: str, max_wait: float = 120.0) -> dict:
+00358|     """Which platforms an email is registered on (holehe — full backend only)."""
+00359|     return _lite_or_full_case(email=email, max_wait=max_wait)
+00360| 
+00361| 
+00362| @mcp.tool()
+00363| def osint_image_search(image_url: str, max_wait: float = 120.0) -> dict:
+00364|     """Reverse-image ONLINE DISCOVERY: pages where this image (or similar) appears — Yandex/Bing/TinEye. Full backend only."""
+00365|     return _lite_or_full_case(image_url=image_url, max_wait=max_wait)
+00366| 
+00367| 
+00368| @mcp.tool()
+00369| def osint_dating(username: str, max_wait: float = 300.0) -> dict:
+00370|     """Dating-platform sweep for a username (Tinder/Badoo/MeetMe/AFF/…) via maigret.
+00371|     Full backend only. Filters results to dating domains. Responsible use only."""
+00372|     base, mode = _resolve()
+00373|     if base is None or mode == "lite":
+00374|         return {"error": "dating sweeps need the full backend (maigret, 3000+ sites)"}
+00375|     r = _http(
+00376|         "POST",
+00377|         base + "/api/scan",
+00378|         {
+00379|             "type": "username",
+00380|             "value": username,
+00381|             "tools": ["maigret"],
+00382|             "options": {"timeout": 15},
+00383|         },
+00384|     )
+00385|     if "job_id" not in r:
+00386|         return {"error": "scan rejected", "detail": r}
+00387|     job = _wait_job(base, r["job_id"], max_wait)
+00388|     hits = []
+00389|     for res in job.get("results", []):
+00390|         for f in res.get("found", []):
+00391|             url = f.get("url") or ""
+00392|             try:
+00393|                 host = urllib.parse.urlparse(url).hostname or ""
+00394|             except ValueError:
+00395|                 host = ""
+00396|             if any(host == d or host.endswith("." + d) for d in DATING_DOMAINS):
+00397|                 hits.append({"site": f.get("site"), "url": url})
+00398|     all_found = sum(len(x.get("found", [])) for x in job.get("results", []))
+00399|     return {
+00400|         "username": username,
+00401|         "status": job.get("status"),
+00402|         "total_accounts_found": all_found,
+00403|         "dating_hits": hits,
+00404|         "note": "dating-only filter; run osint_case for the full picture",
+00405|     }
+00406| 
+00407| 
+00408| @mcp.tool()
+00409| def osint_search_pivots(topic: str, kind: str = "topic") -> dict:
+00410|     """Instant search launchers for a topic or a person's name (no hub needed).
+00411|     kind='person' adds social-site scoped queries + username guesses."""
+00412|     return _pivot_urls(topic, kind)
+00413| 
+00414| 
+00415| if __name__ == "__main__":
+00416|     asyncio.run(mcp.run_stdio_async())
+00417| 
+
+(End of file - total 417 lines)
+</file>

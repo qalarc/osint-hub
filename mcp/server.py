@@ -406,6 +406,26 @@ def osint_dating(username: str, max_wait: float = 300.0) -> dict:
 
 
 @mcp.tool()
+def osint_grade(job_id: str) -> dict:
+    """Jev-grade the found items of a finished osint job: each hit gets
+    tier (verified/likely/weak/junk) + confidence, attached to results, and every
+    decision is logged to the Laya fine-tuning dataset (osint-grading domain)."""
+    base, mode = _resolve()
+    if base is None:
+        return {"error": "no hub reachable"}
+    r = _http("POST", f"{base}/api/jobs/{job_id}/grade", {}, timeout=120)
+    j = _http("GET", f"{base}/api/jobs/{job_id}")
+    out = {"graded": r.get("graded", 0), "job": j.get("id"), "status": j.get("status"), "subjects": {}}
+    for res in j.get("results", []):
+        subj = out["subjects"].setdefault(res.get("qtype", "?"), {})
+        graded = [{"site": f.get("site"), "url": f.get("url"), **f.get("grade", {})}
+                  for f in res.get("found", []) if f.get("grade")]
+        if graded:
+            subj[res["tool"]] = graded
+    return out
+
+
+@mcp.tool()
 def osint_search_pivots(topic: str, kind: str = "topic") -> dict:
     """Instant search launchers for a topic or a person's name (no hub needed).
     kind='person' adds social-site scoped queries + username guesses."""
