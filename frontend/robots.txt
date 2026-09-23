@@ -1,0 +1,31 @@
+# osint.qalarc.com — robots.txt
+# AI crawlers explicitly welcomed (qalarc GEO policy)
+
+User-agent: *
+Allow: /
+
+Sitemap: https://osint.qalarc.com/sitemap.xml
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: Perplexity
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Googlebot
+Allow: /
