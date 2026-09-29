@@ -1,3 +1,7 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 phonenumbers
+# transitive floors: keep known-vulnerable versions out of resolution
+h11>=0.16
+anyio>=4.10
+idna>=3.10
