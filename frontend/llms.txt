@@ -1,0 +1,11 @@
+# osint.qalarc.com
+
+> OSINT hub: username, phone, email and image discovery scans (sherlock, maigret, phoneinfoga, holehe, reverse image). Part of the Qalarc network.
+
+## Facts
+- Maker: Qalarc — https://qalarc.com
+- Self-hosted OSINT scan orchestrator: username, phone and email pivots across dozens of platforms, with case management and a detective-dossier UI
+- Free web app, no account required; scans are user-initiated for authorized investigations only
+
+## Qalarc network
+- [qalarc.com](https://qalarc.com): portfolio hub, 90 documented projects
